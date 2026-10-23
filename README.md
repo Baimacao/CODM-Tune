@@ -1,6 +1,6 @@
 # CODM TUNE
 
-> v11：HUD 改为只采集真实数据；PresentMon 增加 `--no_track_display/gpu/input` 过滤器后，本机已能稳定拿到真实 FPS 与 1% low（实测 95 FPS / 1% low 30 / 卡顿 0.4%）；托盘加入声音、显示/悬浮窗/准心菜单；新增「辅助准心」独立子进程，支持 CSGO/CS2/Valorant/控制台/JSON 码导入与逐项调节；首次启动三页 OOBE；游戏检测过滤本工具自身 PID。
+> v11：HUD 只采集真实数据；PresentMon 加上 `--no_track_display/gpu/input` 后本机已稳定拿到真实 FPS 与 1% low（滚动窗口实测 163 FPS / 1% low 11 / 卡顿 0.6%，也验证过 95/30/0.4%）；托盘加入声音与显示/悬浮窗/准心菜单；新增「辅助准心」独立子进程，支持 CSGO/CS2/Valorant/控制台/JSON 码导入与逐项调节；首次启动三页 OOBE；游戏检测过滤本工具自身 PID。
 
 给《使命召唤手游》高清模拟器用的原生 Windows 性能与体验工具。Win32 + GDI+，不注入、不挂钩游戏进程；系统改动保存原值并可还原。
 
