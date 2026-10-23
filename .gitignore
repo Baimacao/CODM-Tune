@@ -1,0 +1,12 @@
+bin/
+*.obj
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.log
+dist/
+testhome/
+*.zip
+*.sha256
+choice.png
