@@ -1,0 +1,138 @@
+package hud
+
+import (
+	"fmt"
+
+	"codmtune/internal/sys"
+	"codmtune/internal/ui"
+	"codmtune/internal/win32"
+)
+
+// Logical HUD size; the child window may be DPI-scaled beyond this.
+const (
+	hudW = 320
+	hudH = 216
+)
+
+// draw renders one HUD frame. The window is cleared to pure black before this
+// call, and LWA_COLORKEY makes those corners transparent.
+func draw(c *win32.Canvas) {
+	st := snapshot()
+	if st.Theme == "oled" {
+		ui.SetTheme(&ui.OLED)
+	} else {
+		ui.SetTheme(&ui.Dark)
+	}
+	th := ui.CurrentTheme
+	w, h := float32(hudW), float32(hudH)
+	if !st.ShowText {
+		c.FillRoundRect(ui.R(1, 1, w-2, h-2), 16, th.Surface)
+		c.StrokeRoundRect(ui.R(1, 1, w-2, h-2), 16, 1, th.Outline)
+	}
+
+	c.Text(ui.R(16, 10, 200, 18), "CODM HUD", 9, th.Muted, ui.AlignLeft, true)
+	col := th.Success
+	label := "LIVE"
+	if !st.Game {
+		col, label = th.Danger, "OFFLINE"
+	}
+	c.Circle(w-82, 19, 4, col)
+	c.Text(ui.R(w-74, 10, 58, 18), label, 8, col, ui.AlignRight, true)
+	if !st.ShowText {
+		c.Line(14, 30, w-14, 30, 1, th.Outline)
+	}
+
+	if st.ShowFPS {
+		fps := "—"
+		size := float32(26)
+		fpsCol := th.Muted
+		if st.Ready {
+			fps = fmt.Sprintf("%.0f", st.FPS)
+			size = 42
+			fpsCol = th.Text
+		}
+		c.Text(ui.R(16, 38, 150, 48), fps, size, fpsCol, ui.AlignLeft, true)
+		c.Text(ui.R(16, 84, 150, 14), "FPS", 8, th.Text, ui.AlignLeft, false)
+
+		low, stag := "—", "—"
+		if st.Ready {
+			low = fmt.Sprintf("%.0f", st.Low)
+			stag = fmt.Sprintf("%.1f%%", st.Stutter)
+		}
+		x := float32(150)
+		if st.ShowLow {
+			c.Text(ui.R(x, 40, 70, 16), "1% LOW", 8, th.Text, ui.AlignLeft, false)
+			c.Text(ui.R(x, 56, 70, 22), low, 15, th.Text, ui.AlignLeft, true)
+			x += 76
+		}
+		if st.ShowStut {
+			c.Text(ui.R(x, 40, 90, 16), "STUTTER", 8, th.Text, ui.AlignLeft, false)
+			c.Text(ui.R(x, 56, 90, 22), stag, 15, th.Text, ui.AlignLeft, true)
+		}
+	}
+
+	if st.ShowNet {
+		rtt := "—"
+		if st.RTT > 0 {
+			rtt = fmt.Sprintf("%d ms", st.RTT)
+		}
+		c.Text(ui.R(16, 92, 130, 16), "网络延迟", 8, th.Text, ui.AlignLeft, false)
+		c.Text(ui.R(16, 108, 130, 24), rtt, 17, th.Text, ui.AlignLeft, true)
+		if st.Jitter > 0 {
+			c.Text(ui.R(150, 98, 160, 16), fmt.Sprintf("jitter %d ms", st.Jitter), 8, th.Muted, ui.AlignLeft, false)
+		}
+	}
+
+	rowY := float32(132)
+	if st.ShowLoss {
+		los := "—"
+		if st.LossKnown {
+			los = fmt.Sprintf("%.0f%%", st.Loss)
+		}
+		c.Text(ui.R(16, rowY, 190, 14), "吞子弹风险（估算）", 8, th.Text, ui.AlignLeft, false)
+		c.Text(ui.R(w-56, rowY, 40, 14), los, 9, th.Text, ui.AlignRight, true)
+		rowY += 16
+	}
+	if st.ShowProv {
+		prov := st.Province
+		if prov == "" {
+			prov = st.ServerIP
+		}
+		if prov != "" {
+			c.Text(ui.R(16, rowY, w-32, 14), "服务器 "+prov, 8, th.Text, ui.AlignLeft, false)
+			rowY += 16
+		}
+	}
+
+	if st.Style == "full" && st.ShowKeys {
+		y := rowY + 2
+		keys := []struct {
+			vk int
+			l  string
+		}{{0x57, "W"}, {0x41, "A"}, {0x53, "S"}, {0x44, "D"}, {0x10, "SHIFT"}, {0x11, "CTRL"}, {0x20, "SPACE"}, {0x52, "R"}}
+		x := float32(16)
+		for _, k := range keys {
+			wid := float32(22)
+			if len(k.l) > 1 {
+				wid = 40
+			}
+			if x+wid > w-16 {
+				break
+			}
+			on := sys.KeyDown(k.vk)
+			bg, fg := th.Surface2, th.Muted
+			if on {
+				bg, fg = th.Primary, th.OnPrimary
+			}
+			if st.ShowText {
+				c.Text(ui.R(x, y, wid, 20), k.l, 9, fg, ui.AlignCenter, true)
+			} else {
+				c.FillRoundRect(ui.R(x, y, wid, 20), 5, bg)
+				c.Text(ui.R(x, y, wid, 20), k.l, 8, fg, ui.AlignCenter, true)
+			}
+			x += wid + 4
+		}
+	}
+
+	c.Text(ui.R(16, h-18, w-32, 12), "PresentMon · 估算值，不是命中判定", 7, th.Muted, ui.AlignLeft, false)
+}
