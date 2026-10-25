@@ -37,6 +37,7 @@ type State struct {
 	Corner    string  `json:"corner"`
 	HudX      int     `json:"hud_x"`
 	HudY      int     `json:"hud_y"`
+	HudScale  int     `json:"hud_scale"`
 	ShowFPS   bool    `json:"show_fps"`
 	ShowLow   bool    `json:"show_low"`
 	ShowStut  bool    `json:"show_stutter"`
@@ -140,13 +141,18 @@ func Run() error {
 		return nil
 	}
 	load()
+	st := snapshot()
+	scale := float32(st.HudScale) / 100
+	if scale < 0.7 || scale > 1.6 {
+		scale = 1
+	}
 	go func() {
 		t := time.NewTicker(250 * time.Millisecond)
 		for range t.C {
 			load()
 		}
 	}()
-	return win32.RunHUD(320, 216, draw)
+	return win32.RunHUD(int(320*scale), int(216*scale), draw)
 }
 
 func load() {

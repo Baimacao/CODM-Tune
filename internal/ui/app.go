@@ -465,10 +465,10 @@ func (a *App) Wheel(x, y, delta float32) {
 		l = a.focusedList(a.Focus)
 	}
 	if l != nil {
-		// One wheel notch is a deliberate page-like nudge, not a 0.9-row
-		// crawl. The spring still smooths it, but repeated notches now reach
-		// long settings pages in a few flicks.
-		l.ScrollBy(-delta * 4.0)
+		// ScrollBy takes pixels, not rows. A notch is roughly half a viewport;
+		// the spring smooths the jump, and the old tiny values felt like no
+		// movement at all.
+		l.ScrollBy(-delta * 12.0)
 	}
 }
 

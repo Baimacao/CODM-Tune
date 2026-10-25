@@ -82,6 +82,7 @@ func (c *Control) overlayLoop() {
 			name := filepath.Base(c.gameExe)
 			c.mu.Unlock()
 			stats := OverlayStats{Game: running}
+			recActive, _ := c.FPSRecordState()
 			if !running {
 				if pm != nil {
 					pm.blocked = false
@@ -89,7 +90,7 @@ func (c *Control) overlayLoop() {
 					pm.ready = false
 				}
 			}
-			if running && cfg.OverlayEnabled && name != "" {
+			if running && (cfg.OverlayEnabled || recActive) && name != "" {
 				stats = c.collectOverlay(cfg, pid, name)
 			}
 			if running && pid != 0 {
@@ -102,6 +103,7 @@ func (c *Control) overlayLoop() {
 			stats.Jitter = jitterOf(lastRTT)
 			stats.LossKnown = stats.RTT > 0 || stats.Stutter > 0
 			stats.Loss = estimateLoss(stats)
+			c.recordSample(stats)
 			c.mu.Lock()
 			if c.overlay != stats {
 				c.overlay = stats
@@ -172,6 +174,16 @@ func (c *Control) collectOverlay(cfg Config, pid uint32, name string) OverlaySta
 	if pm == nil {
 		return stats
 	}
+	// PresentMon writes an append-only CSV. Restarting it periodically keeps the
+	// file bounded; otherwise a long session grows to hundreds of MB and every
+	// poll parses the whole file, which looks like a memory/CPU leak.
+	if !pm.started.IsZero() && time.Since(pm.started) > 120*time.Second {
+		if pm.cmd != nil && pm.cmd.Process != nil {
+			_ = pm.cmd.Process.Kill()
+		}
+		pm = nil
+		return stats
+	}
 	if !pm.started.IsZero() && time.Since(pm.started) > 12*time.Second && pm.frameCount() == 0 {
 		if pm.cmd != nil && pm.cmd.Process != nil {
 			_ = pm.cmd.Process.Kill()
@@ -216,14 +228,12 @@ func (p *presentMon) readLocked() ([]frameRow, bool) {
 // to a live file because PresentMon keeps the output file locked exclusively.
 func (p *presentMon) poll() {
 	dbg := func(s string) {
-		f, err := os.OpenFile(filepath.Join(configDir(), "overlay", "pmdebug.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-		if err == nil {
-			_, _ = f.WriteString(time.Now().Format("15:04:05 ") + s + "\n")
-			_ = f.Close()
-		}
+		// PresentMon debug logging was useful during bring-up but it writes a
+		// growing file on every 300 ms poll. Keep the hook for tests, not disk.
+		_ = s
 	}
 	dbg("poll start " + p.csv)
-	t := time.NewTicker(300 * time.Millisecond)
+	t := time.NewTicker(500 * time.Millisecond)
 	for range t.C {
 		b, err := os.ReadFile(p.csv)
 		if err != nil {

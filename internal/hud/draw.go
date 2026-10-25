@@ -18,6 +18,11 @@ const (
 // call, and LWA_COLORKEY makes those corners transparent.
 func draw(c *win32.Canvas) {
 	st := snapshot()
+	scale := float32(st.HudScale) / 100
+	if scale < 0.7 || scale > 1.6 {
+		scale = 1
+	}
+	c.SetScale(scale)
 	if st.Theme == "oled" {
 		ui.SetTheme(&ui.OLED)
 	} else {
@@ -30,14 +35,14 @@ func draw(c *win32.Canvas) {
 		c.StrokeRoundRect(ui.R(1, 1, w-2, h-2), 16, 1, th.Outline)
 	}
 
-	c.Text(ui.R(16, 10, 200, 18), "CODM HUD", 9, th.Muted, ui.AlignLeft, true)
+	hudText(c, st, ui.R(16, 10, 200, 18), "CODM HUD", 9, th.Muted, ui.AlignLeft, true)
 	col := th.Success
 	label := "LIVE"
 	if !st.Game {
 		col, label = th.Danger, "OFFLINE"
 	}
 	c.Circle(w-82, 19, 4, col)
-	c.Text(ui.R(w-74, 10, 58, 18), label, 8, col, ui.AlignRight, true)
+	hudText(c, st, ui.R(w-74, 10, 58, 18), label, 8, col, ui.AlignRight, true)
 	if !st.ShowText {
 		c.Line(14, 30, w-14, 30, 1, th.Outline)
 	}
@@ -51,8 +56,8 @@ func draw(c *win32.Canvas) {
 			size = 42
 			fpsCol = th.Text
 		}
-		c.Text(ui.R(16, 38, 150, 48), fps, size, fpsCol, ui.AlignLeft, true)
-		c.Text(ui.R(16, 84, 150, 14), "FPS", 8, th.Text, ui.AlignLeft, false)
+		hudText(c, st, ui.R(16, 38, 150, 48), fps, size, fpsCol, ui.AlignLeft, true)
+		hudText(c, st, ui.R(16, 84, 150, 14), "FPS", 8, th.Text, ui.AlignLeft, false)
 
 		low, stag := "—", "—"
 		if st.Ready {
@@ -61,13 +66,13 @@ func draw(c *win32.Canvas) {
 		}
 		x := float32(150)
 		if st.ShowLow {
-			c.Text(ui.R(x, 40, 70, 16), "1% LOW", 8, th.Text, ui.AlignLeft, false)
-			c.Text(ui.R(x, 56, 70, 22), low, 15, th.Text, ui.AlignLeft, true)
+			hudText(c, st, ui.R(x, 40, 70, 16), "1% LOW", 8, th.Text, ui.AlignLeft, false)
+			hudText(c, st, ui.R(x, 56, 70, 22), low, 15, th.Text, ui.AlignLeft, true)
 			x += 76
 		}
 		if st.ShowStut {
-			c.Text(ui.R(x, 40, 90, 16), "STUTTER", 8, th.Text, ui.AlignLeft, false)
-			c.Text(ui.R(x, 56, 90, 22), stag, 15, th.Text, ui.AlignLeft, true)
+			hudText(c, st, ui.R(x, 40, 90, 16), "STUTTER", 8, th.Text, ui.AlignLeft, false)
+			hudText(c, st, ui.R(x, 56, 90, 22), stag, 15, th.Text, ui.AlignLeft, true)
 		}
 	}
 
@@ -76,10 +81,10 @@ func draw(c *win32.Canvas) {
 		if st.RTT > 0 {
 			rtt = fmt.Sprintf("%d ms", st.RTT)
 		}
-		c.Text(ui.R(16, 92, 130, 16), "网络延迟", 8, th.Text, ui.AlignLeft, false)
-		c.Text(ui.R(16, 108, 130, 24), rtt, 17, th.Text, ui.AlignLeft, true)
+		hudText(c, st, ui.R(16, 92, 130, 16), "网络延迟", 8, th.Text, ui.AlignLeft, false)
+		hudText(c, st, ui.R(16, 108, 130, 24), rtt, 17, th.Text, ui.AlignLeft, true)
 		if st.Jitter > 0 {
-			c.Text(ui.R(150, 98, 160, 16), fmt.Sprintf("jitter %d ms", st.Jitter), 8, th.Muted, ui.AlignLeft, false)
+			hudText(c, st, ui.R(150, 98, 160, 16), fmt.Sprintf("jitter %d ms", st.Jitter), 8, th.Muted, ui.AlignLeft, false)
 		}
 	}
 
@@ -89,8 +94,8 @@ func draw(c *win32.Canvas) {
 		if st.LossKnown {
 			los = fmt.Sprintf("%.0f%%", st.Loss)
 		}
-		c.Text(ui.R(16, rowY, 190, 14), "吞子弹风险（估算）", 8, th.Text, ui.AlignLeft, false)
-		c.Text(ui.R(w-56, rowY, 40, 14), los, 9, th.Text, ui.AlignRight, true)
+		hudText(c, st, ui.R(16, rowY, 190, 14), "吞子弹风险（估算）", 8, th.Text, ui.AlignLeft, false)
+		hudText(c, st, ui.R(w-56, rowY, 40, 14), los, 9, th.Text, ui.AlignRight, true)
 		rowY += 16
 	}
 	if st.ShowProv {
@@ -99,7 +104,7 @@ func draw(c *win32.Canvas) {
 			prov = st.ServerIP
 		}
 		if prov != "" {
-			c.Text(ui.R(16, rowY, w-32, 14), "服务器 "+prov, 8, th.Text, ui.AlignLeft, false)
+			hudText(c, st, ui.R(16, rowY, w-32, 14), "服务器 "+prov, 8, th.Text, ui.AlignLeft, false)
 			rowY += 16
 		}
 	}
@@ -125,14 +130,26 @@ func draw(c *win32.Canvas) {
 				bg, fg = th.Primary, th.OnPrimary
 			}
 			if st.ShowText {
-				c.Text(ui.R(x, y, wid, 20), k.l, 9, fg, ui.AlignCenter, true)
+				hudText(c, st, ui.R(x, y, wid, 20), k.l, 9, fg, ui.AlignCenter, true)
 			} else {
 				c.FillRoundRect(ui.R(x, y, wid, 20), 5, bg)
-				c.Text(ui.R(x, y, wid, 20), k.l, 8, fg, ui.AlignCenter, true)
+				hudText(c, st, ui.R(x, y, wid, 20), k.l, 8, fg, ui.AlignCenter, true)
 			}
 			x += wid + 4
 		}
 	}
 
-	c.Text(ui.R(16, h-18, w-32, 12), "PresentMon · 估算值，不是命中判定", 7, th.Muted, ui.AlignLeft, false)
+	hudText(c, st, ui.R(16, h-18, w-32, 12), "PresentMon · 估算值，不是命中判定", 7, th.Muted, ui.AlignLeft, false)
+}
+
+// hudText keeps the HUD legible over bright game scenes in pure-text mode.
+// A 2px dark outline is drawn in twelve directions before the glyphs.
+func hudText(c *win32.Canvas, st State, r ui.Rect, s string, size float32, col ui.Color, align ui.Align, bold bool) {
+	if st.ShowText {
+		out := ui.RGB(0, 0, 0)
+		for _, d := range [][2]float32{{-2, 0}, {2, 0}, {0, -2}, {0, 2}, {-2, -2}, {2, -2}, {-2, 2}, {2, 2}, {-2, -1}, {2, 1}, {-1, -2}, {1, 2}} {
+			c.Text(ui.R(r.X+d[0], r.Y+d[1], r.W, r.H), s, size, out, align, bold)
+		}
+	}
+	c.Text(r, s, size, col, align, bold)
 }

@@ -78,6 +78,7 @@ type Config struct {
 	OverlayIdle    bool   `json:"overlay_idle"`
 	OverlayStyle   string `json:"overlay_style"` // compact | full
 	OverlayOpacity int    `json:"overlay_opacity"`
+	OverlayScale   int    `json:"overlay_scale"`
 	OverlayCorner  string `json:"overlay_corner"` // tr | tl | br | bl | custom
 	OverlayX       int    `json:"overlay_x"`
 	OverlayY       int    `json:"overlay_y"`
@@ -112,7 +113,7 @@ type Config struct {
 
 func defaultConfig() Config {
 	return Config{
-		Version:            13,
+		Version:            14,
 		PowerEnabled:       true,
 		ScheduleEnabled:    true,
 		ACENames:           []string{"SGuard64.exe", "SGuardSvc64.exe"},
@@ -133,13 +134,14 @@ func defaultConfig() Config {
 		OverlayStyle:       "compact",
 		OverlayIdle:        true,
 		OverlayOpacity:     245,
+		OverlayScale:       100,
 		OverlayCorner:      "tr",
 		OverlayX:           -1,
 		OverlayY:           -1,
 		OverlayFPS:         true,
 		OverlayLow:         true,
 		OverlayStutter:     true,
-		OverlayLoss:        true,
+		OverlayLoss:        false,
 		OverlayKeys:        true,
 		OverlayNet:         true,
 		OverlayServer:      true,
@@ -200,11 +202,10 @@ func loadConfig() Config {
 		cfg.OverlayServer = true
 		cfg.Version = 12
 	}
-	if cfg.Version < 13 {
-		// The estimator is demand-visible again. It stays explicitly labelled as
-		// an estimate and renders "—" until there is a network/frame sample.
-		cfg.OverlayLoss = true
-		cfg.Version = 13
+	if cfg.Version < 14 {
+		// The loss estimate is too noisy to be on by default; keep it opt-in.
+		cfg.OverlayLoss = false
+		cfg.Version = 14
 	}
 	if len(cfg.ACENames) == 0 {
 		cfg.ACENames = defaultConfig().ACENames
@@ -272,6 +273,15 @@ func loadConfig() Config {
 	if cfg.OverlayOpacity > 255 {
 		cfg.OverlayOpacity = 255
 	}
+	if cfg.OverlayScale == 0 {
+		cfg.OverlayScale = 100
+	}
+	if cfg.OverlayScale < 70 {
+		cfg.OverlayScale = 70
+	}
+	if cfg.OverlayScale > 160 {
+		cfg.OverlayScale = 160
+	}
 	if cfg.OverlayStyle != "full" {
 		cfg.OverlayStyle = "compact"
 	}
@@ -311,3 +321,4 @@ func saveConfig(cfg Config) error {
 	}
 	return os.Rename(tmp, path)
 }
+

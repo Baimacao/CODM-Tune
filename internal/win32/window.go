@@ -220,7 +220,7 @@ func (w *window) restore() {
 	w.hidden = false
 	w.removeTray()
 	w.last = time.Now()
-	pShowWindow.Call(w.hwnd, SW_SHOW)
+	pShowWindow.Call(w.hwnd, 9) // SW_RESTORE: SW_SHOW alone leaves a minimized window minimized
 	pSetForegroundWindow.Call(w.hwnd)
 	w.setTimer(16)
 }

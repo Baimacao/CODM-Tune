@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"codmtune/internal/hud"
 	"codmtune/internal/tune"
 	"codmtune/internal/ui"
 )
@@ -364,6 +365,33 @@ func (s *screens) overlayCat() *ui.Node {
 				{"full", "完整", "额外显示 jitter、帧数与按键"},
 			}, func(v string) {
 				s.c.Update(func(c *tune.Config) { c.OverlayStyle = v })
+			})
+		},
+	}))
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 88), feature{
+		icon: "monitor", title: "HUD 大小",
+		desc: "80% / 100% / 120% / 150%；切换后会重建悬浮窗，位置保持不变。",
+		value: func() string {
+			v := s.c.Cfg().OverlayScale
+			if v <= 0 {
+				v = 100
+			}
+			return fmt.Sprintf("%d%%", v)
+		},
+		hint: "Enter 展开",
+		open: func() {
+			cur := fmt.Sprintf("%d", s.c.Cfg().OverlayScale)
+			s.choose("overlay", "HUD 大小", "按比例缩放整个 HUD", cur, []choiceOption{
+				{"80", "80%", "更小，适合小屏"},
+				{"100", "100%", "默认"},
+				{"120", "120%", "更醒目"},
+				{"150", "150%", "最大，适合远距离观看"},
+			}, func(v string) {
+				n := 100
+				_, _ = fmt.Sscanf(v, "%d", &n)
+				s.c.Update(func(c *tune.Config) { c.OverlayScale = n })
+				// The child owns its surface size; rebuild it with the new scale.
+				hud.StopChild()
 			})
 		},
 	}))

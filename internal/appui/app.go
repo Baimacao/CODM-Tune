@@ -105,6 +105,13 @@ func Run() error {
 			a.OnSound("tray")
 		}
 	})
+	go func() {
+		t := time.NewTicker(3 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			win32.TrimWorkingSet()
+		}
+	}()
 	err := win32.Run("CODM Tune", a)
 	hud.StopChild()
 	crosshair.StopChild()

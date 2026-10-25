@@ -106,6 +106,9 @@ func (l *List) ScrollBy(d float32) {
 	if d == 0 {
 		return
 	}
+	// A page may have added rows since the last draw; recompute the extent so a
+	// wheel notch is not clamped to a stale limit.
+	l.layout()
 	next := clampf(l.scroll.Target()+d, 0, l.limit)
 	over := l.scroll.Target() + d - next
 	if over != 0 {
@@ -115,8 +118,30 @@ func (l *List) ScrollBy(d float32) {
 	} else {
 		l.pullRaw = 0
 	}
-	l.scroll.Set(next)
+	l.scroll.Jump(next)
+	// Wheel/page jumps are meant to land immediately. Keeping the old `last`
+	// makes update() spawn a long row-wave that visually cancels the jump.
+	l.last = next
 	Invalidate()
+}
+
+// snapRow lands wheel jumps on a row boundary so the first visible card is not
+// cut in half under the header. This was the visible "scroll bug" after the
+// wheel step became large.
+func (l *List) snapRow(target float32) float32 {
+	best, bestD := float32(0), target
+	y := float32(0)
+	for _, r := range l.rows {
+		d := y - target
+		if d < 0 {
+			d = -d
+		}
+		if d < bestD {
+			best, bestD = y, d
+		}
+		y += r.R.H + l.gap
+	}
+	return best
 }
 
 // Reveal scrolls the focused row into view.

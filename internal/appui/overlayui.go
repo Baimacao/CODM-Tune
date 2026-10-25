@@ -37,6 +37,7 @@ func (s *screens) overlayDriver() {
 			Corner:    cfg.OverlayCorner,
 			HudX:      cfg.OverlayX,
 			HudY:      cfg.OverlayY,
+			HudScale:  cfg.OverlayScale,
 			ShowFPS:   cfg.OverlayFPS,
 			ShowLow:   cfg.OverlayLow,
 			ShowStut:  cfg.OverlayStutter,

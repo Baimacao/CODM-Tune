@@ -104,6 +104,7 @@ var (
 	pRegDeleteKeyW   = p(advapi32, "RegDeleteKeyW")
 
 	pGetProcessMemoryInfo = p(psapi, "GetProcessMemoryInfo")
+	pEmptyWorkingSet      = p(psapi, "EmptyWorkingSet")
 	pGetExtendedTcpTable  = p(iphlpapi, "GetExtendedTcpTable")
 
 	pPdhOpenQueryW             = p(pdh, "PdhOpenQueryW")

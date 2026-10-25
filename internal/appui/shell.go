@@ -25,6 +25,7 @@ var navItems = []navItem{
 	{"input", "输入与鼠标", "mouse"},
 	{"overlay", "悬浮窗", "window"},
 	{"crosshair", "辅助准心", "scope"},
+	{"record", "帧率记录", "gauge"},
 	{"replay", "回放管理", "disc"},
 	{"diagnostics", "诊断", "wifi"},
 	{"knowledge", "知识库", "book"},
@@ -229,6 +230,8 @@ func (s *screens) build(id string) *ui.Node {
 		return s.overlayCat()
 	case "crosshair":
 		return s.crosshairCat()
+	case "record":
+		return s.fpsRecordCat()
 	case "replay":
 		return s.replayCat()
 	case "diagnostics":
