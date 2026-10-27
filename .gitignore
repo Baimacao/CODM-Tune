@@ -10,3 +10,4 @@ testhome/
 *.zip
 *.sha256
 choice.png
+tools/__pycache__/

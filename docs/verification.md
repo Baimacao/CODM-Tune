@@ -781,20 +781,33 @@ verify mem-run   before=9192MB after=12292MB freed=3096MB runs=4 skipped=[]
 ## 72. 资源实测（最终构建）
 
 ```
-idle 20 s 采样（主进程 + 2 个子进程）
-24108  0.5% of one core   31.9 MB   (主进程)
- 7276  0.2% of one core   15.8 MB   (--overlay)
- 5908  0.0% of one core   15.6 MB   (--crosshair)
-合计约 0.7% CPU / 63 MB
+idle 120 s 采样（主进程 + 2 个子进程，终末地 STOCK，HUD OFFLINE）
+21168  0.08% of one core   2.5 MB   (--overlay)
+22032  1.41% of one core  10.9 MB   (主进程)
+24460  0.00% of one core   2.5 MB   (--crosshair)
+合计约 1.48% of one core / 62 MB
+逐秒峰值：主进程 4.7%，--overlay 3.1%，--crosshair 1.6%
 ```
 
-- 三进程合计 63 MB，在 128 MB 预算内；比 v11 单进程 12 MB 增加的是 HUD 与准心两个独立子进程。
-- 静止 CPU 0.7%，全部来自 4 Hz HUD 与 20 Hz 主界面重绘；隐藏到托盘后应接近 0（未单独采样）。
+- 内存是稳定后的工作集：启动瞬间约 32 / 16 / 17 MB，`TrimWorkingSet`（每 3 分钟）与回收后回落到 11 / 2.5 / 2.5 MB。
+- 三进程合计 62 MB，在 128 MB 预算内；比 v11 单进程 12 MB 增加的是 HUD 与准心两个独立子进程。
+- "单核占比"与任务管理器的 8 核百分比换算：1.48% ÷ 8 = 0.19%，所以任务管理器里看到的是零点几。
+- 采样方法：按 PID 建哈希表取 `Process.CPU` 差值再除以实际间隔；用 `Get-CimInstance Win32_Process` 的 `CommandLine` 区分 `--overlay` / `--crosshair`。用 `Where-Object Id -eq` 在字符串插值里会静默取空，读数不可信。
+- 短时尖峰计入后仍会看到偶发 3.1%/4.7%（3 分钟 `TrimWorkingSet`、10 s 全进程快照、切页 0.78 s 全速重绘），持续负载以 120 s 均值为准。
+
+### 72.1 本轮修掉的四个真实热点
+
+1. **准心子进程无条件重绘**：`internal/win32/cross.go` 的 120 ms 定时器每次都 `crossPaint` 全量重绘并 Blit，即使图案没变。加 `dirty` 字段 + `CrossMarkDirty()`，定时器提到 250 ms，`internal/crosshair/child.go` 的 `load()` 只在 settings/show 变化时置脏。修后 `--crosshair` 从 0.21–5.42% 降到 0.01–0.08%。
+2. **HUD 子进程每 250 ms 重设窗口属性**：`internal/hud/hud.go` 的 `load()` 无条件调 `HUDAlpha` / `HUDPosition` / `HUDShow`，每次都触发 DWM 重组 layered 窗口。改为逐字段比较，只有真的变化才调用。
+3. **HUD 离线时仍按 4 Hz 重绘**：`internal/hud/draw.go` 的 `Digest()` 只在 `Game || Ready` 时把 FPS/Low/Stutter/RTT/Jitter/Loss/ServerIP/Province 计入指纹，否则 RTT 每秒采样会被当成新内容。
+4. **footer 每 10 s 无条件重绘**：`internal/tune/control.go` 的 `updateSelfStat()` 末尾原来无条件 `c.changed()`，注释还写着"footer 显示这些数字"。现在只有 CPU 变化 ≥0.1%、内存变化 ≥1 MB 或 ACE 进程数变化才请求重绘，浮点抖动不再让整窗失效。
+
+> 排查方法：拆分到最小进程复现。单独跑 `RunHUD`（空 render）≈0%，最小 layered 窗口 5 Hz Blit ≈0%，四条线程各约 200 ms/15 s 都指向消息循环本身而非绘制。最终定位到 `updateSelfStat` 的 `changed()` 与 `Digest()` 的字段面，属"每 10 s 全窗重绘 + 每 250 ms 属性设置"的组合，不是 GDI+ 单次开销。
 
 ## 73. 构建
 
 ```
-build.cmd       # 成功，bin\codmtune.exe 12,086,784 bytes
+build.cmd       # 成功，bin\codmtune.exe 12,088,832 bytes
 go vet ./...    # 0
 go test ./...   # 全 ok
 ```

@@ -149,9 +149,15 @@ func draw(c *win32.Canvas) {
 func Digest() string {
 	st := snapshot()
 	var b strings.Builder
-	fmt.Fprintf(&b, "%t|%t|%t|%.0f|%.0f|%.1f|%d|%d|%.0f|%t|%s|%s|%s|%d|%d|%d|%d|",
-		st.Show, st.Game, st.Ready, st.FPS, st.Low, st.Stutter, st.RTT, st.Jitter,
-		st.Loss, st.LossKnown, st.ServerIP, st.Province, st.Style, st.Opacity,
+	// Live fields only matter while CODM is running. Counting them while the
+	// overlay sits at OFFLINE made every RTT sample look like a new frame, so
+	// the HUD repainted four times a second for identical pixels.
+	if st.Game || st.Ready {
+		fmt.Fprintf(&b, "%t|%t|%.0f|%.0f|%.1f|%d|%d|%.0f|%t|%s|%s|",
+			st.Game, st.Ready, st.FPS, st.Low, st.Stutter, st.RTT, st.Jitter,
+			st.Loss, st.LossKnown, st.ServerIP, st.Province)
+	}
+	fmt.Fprintf(&b, "%t|%s|%d|%d|%d|%d|", st.Show, st.Style, st.Opacity,
 		st.HudX, st.HudY, st.HudScale)
 	for _, v := range []bool{st.ShowFPS, st.ShowLow, st.ShowStut, st.ShowLoss, st.ShowText, st.ShowKeys, st.ShowNet, st.ShowProv} {
 		if v {

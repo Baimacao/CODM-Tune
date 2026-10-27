@@ -184,15 +184,27 @@ func load() {
 		}
 	}
 	stateMu.Lock()
+	prev := current
 	current = st
 	stateMu.Unlock()
-	win32.HUDAlpha(uint8(clamp(st.Opacity, 178, 255)))
-	if st.Corner == "custom" {
-		win32.HUDPositionCustom(st.HudX, st.HudY)
-	} else {
-		win32.HUDPosition(st.Corner)
+	// Only touch the window when a window-level property actually changed.
+	// SetLayeredWindowAttributes and SetWindowPos each force DWM to recompose
+	// the layered window; calling them four times a second for identical values
+	// showed up as 5% of one core in the overlay process.
+	if st.Opacity != prev.Opacity {
+		win32.HUDAlpha(uint8(clamp(st.Opacity, 178, 255)))
 	}
-	win32.HUDShow(st.Show)
+	if st.Corner != prev.Corner || (st.Corner == "custom" &&
+		(st.HudX != prev.HudX || st.HudY != prev.HudY || st.HudScale != prev.HudScale)) {
+		if st.Corner == "custom" {
+			win32.HUDPositionCustom(st.HudX, st.HudY)
+		} else {
+			win32.HUDPosition(st.Corner)
+		}
+	}
+	if st.Show != prev.Show {
+		win32.HUDShow(st.Show)
+	}
 }
 
 func snapshot() State {

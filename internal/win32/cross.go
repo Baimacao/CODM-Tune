@@ -23,6 +23,10 @@ type crossWindow struct {
 	render  func(*Canvas)
 	alpha   uint8
 	visible bool
+	// dirty gates the repaint. The crosshair is a still image: painting it
+	// eight times a second forever burns a slice of the core that belongs to
+	// the game. WM_TIMER only polls a flag now; a real blit happens on change.
+	dirty bool
 }
 
 var gCross *crossWindow
@@ -61,10 +65,10 @@ func RunCrosshair(w, h int, render func(*Canvas)) error {
 		surf.Close()
 		return fmt.Errorf("crosshair window: %v", e)
 	}
-	gCross = &crossWindow{hwnd: hwnd, surface: surf, render: render, alpha: 220}
+	gCross = &crossWindow{hwnd: hwnd, surface: surf, render: render, alpha: 220, dirty: true}
 	CrossAlpha(220)
 	CrossCenter()
-	pSetTimer.Call(hwnd, crossTimer, 120, 0)
+	pSetTimer.Call(hwnd, crossTimer, 250, 0)
 	var msg MSG
 	for {
 		r, _, _ := pGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
@@ -85,7 +89,8 @@ func crossProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 	o := gCross
 	switch msg {
 	case WM_TIMER:
-		if wparam == crossTimer && o != nil && o.visible {
+		if wparam == crossTimer && o != nil && o.visible && o.dirty {
+			o.dirty = false
 			crossPaint(o)
 		}
 		return 0
@@ -109,6 +114,14 @@ func crossPaint(o *crossWindow) {
 	}
 }
 
+// CrossMarkDirty asks for one repaint on the next tick. Called by the state
+// loader when the settings actually changed; identical state costs nothing.
+func CrossMarkDirty() {
+	if gCross != nil {
+		gCross.dirty = true
+	}
+}
+
 // CrossAlpha sets crosshair opacity; black stays colour-keyed.
 func CrossAlpha(a uint8) {
 	if gCross == nil {
@@ -126,6 +139,7 @@ func CrossShow(v bool) {
 	gCross.visible = v
 	if v {
 		pShowWindow.Call(gCross.hwnd, 4)
+		gCross.dirty = false
 		crossPaint(gCross)
 	} else {
 		pShowWindow.Call(gCross.hwnd, SW_HIDE)

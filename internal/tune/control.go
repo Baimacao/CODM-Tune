@@ -2,6 +2,7 @@ package tune
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -851,12 +852,20 @@ func (c *Control) updateSelfStat(procs []sys.Proc) {
 			aceCnt++
 		}
 	}
+	memMB := float64(ws) / (1024 * 1024)
 	c.mu.Lock()
+	// The sampling window is ten seconds, so a repaint is only worth asking
+	// for when a number the footer prints actually moved. Without this the
+	// floating-point jitter of cpuPct invalidated the whole window every tick
+	// for a pixel-identical picture.
+	moved := math.Abs(c.tool.CPU-cpuPct) >= 0.1 ||
+		math.Abs(c.tool.MemMB-memMB) >= 1 ||
+		c.tool.ACECnt != aceCnt
 	c.tool.CPU = cpuPct
-	c.tool.MemMB = float64(ws) / (1024 * 1024)
+	c.tool.MemMB = memMB
 	c.tool.ACECnt = aceCnt
 	c.mu.Unlock()
-	// The footer shows these numbers, so ask for a repaint even when the
-	// process is comfortably below the budget.
-	c.changed()
+	if moved {
+		c.changed()
+	}
 }

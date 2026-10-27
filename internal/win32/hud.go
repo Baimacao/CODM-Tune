@@ -17,6 +17,7 @@ import (
 const (
 	hudClass = "CodmTuneHUD"
 	hudTimer = 5
+	hudTick  = 200
 )
 
 type hudWindow struct {
@@ -74,7 +75,7 @@ func RunHUD(w, h int, render func(*Canvas), digest func() string) error {
 	gHUD = &hudWindow{hwnd: hwnd, surface: surf, render: render, digest: digest, alpha: 220, corner: "tr"}
 	HUDAlpha(220)
 	HUDPosition("tr")
-	pSetTimer.Call(hwnd, hudTimer, 200, 0)
+	pSetTimer.Call(hwnd, hudTimer, hudTick, 0)
 	return hudMessageLoop(hwnd)
 }
 

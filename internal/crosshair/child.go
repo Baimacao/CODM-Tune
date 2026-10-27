@@ -2,6 +2,7 @@ package crosshair
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,10 +119,15 @@ func load() {
 		os.Exit(0)
 	}
 	mu.Lock()
+	changed := fmt.Sprintf("%+v|%v", state.Settings, state.Show) !=
+		fmt.Sprintf("%+v|%v", st.Settings, st.Show)
 	state = st
 	mu.Unlock()
 	win32.CrossAlpha(uint8(st.Settings.Alpha))
 	win32.CrossShow(st.Show)
+	if changed {
+		win32.CrossMarkDirty()
+	}
 }
 
 func draw(c *win32.Canvas) {
