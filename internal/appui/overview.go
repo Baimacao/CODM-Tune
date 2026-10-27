@@ -54,6 +54,14 @@ func (s *screens) overview() *ui.Node {
 		warn := ui.NewNode(ui.R(PadX, 288, Wide, 20))
 		warn.Draw = func(n *ui.Node, c ui.Painter, r ui.Rect) {
 			th := ui.CurrentTheme
+			if th.Style == "endfield" {
+				// A caution line is a mark block plus ink type; red is
+				// reserved for destructive rows, and the accent may not be
+				// used as a line or as type in this style.
+				c.FillRect(ui.R(r.X, r.Y+5, 3, 12), th.Mark)
+				c.Text(ui.R(r.X+9, r.Y, r.W-9, r.H), fmt.Sprintf("已启用 %d 项调整，可能影响帧稳定性；工具自身仍保持在 128 MB 以内", count), 11, th.Text, ui.AlignLeft, true)
+				return
+			}
 			c.Text(ui.R(r.X, r.Y, r.W, r.H), fmt.Sprintf("已启用 %d 项调整，可能影响帧稳定性；工具自身仍保持在 128 MB 以内", count), 11, th.Danger, ui.AlignLeft, true)
 		}
 		root.Add(warn)
@@ -119,6 +127,30 @@ func (s *screens) tile(r ui.Rect, title, icon string, get func() (string, string
 		card(c, rr, n.Press.Get(), th.Surface)
 		status, detail, tone := get()
 		col := colorOf(tone)
+		if th.Style == "endfield" {
+			// Icon plate is a hairline square, not a tinted disc: rounded
+			// plates would read as the MD3E family. The tone shows up as a
+			// mark bar beside the status line, which is the one place a block
+			// of accent is allowed to mean "needs attention".
+			r := ui.R(rr.X+16, rr.Y+14, 34, 34)
+			c.Line(r.X, r.Y, r.Right(), r.Y, 1, th.Outline2)
+			c.Line(r.X, r.Bottom(), r.Right(), r.Bottom(), 1, th.Outline2)
+			c.Line(r.X, r.Y, r.X, r.Bottom(), 1, th.Outline2)
+			c.Line(r.Right(), r.Y, r.Right(), r.Bottom(), 1, th.Outline2)
+			drawIcon(c, ui.R(rr.X+24, rr.Y+22, 18, 18), icon, th.Text)
+			if tone != tune.ToneGood {
+				c.FillRect(ui.R(rr.X+16, rr.Y+63, 3, 16), th.Mark)
+			}
+			c.Text(ui.R(rr.X+58, rr.Y+14, rr.W-72, 22), title, 13, th.Text, ui.AlignLeft, true)
+			runes := []rune(status)
+			if len(runes) > 14 {
+				status = string(runes[:13]) + "…"
+			}
+			c.Text(ui.R(rr.X+24, rr.Y+62, rr.W-40, 20), status, 12, th.Text, ui.AlignLeft, true)
+			c.TextBlock(ui.R(rr.X+16, rr.Y+90, rr.W-32, 40), detail, 11, th.Muted, ui.AlignLeft, false)
+			c.Text(ui.R(rr.X+16, rr.Bottom()-24, rr.W-32, 16), "打开 →", 10, th.Muted, ui.AlignRight, false)
+			return
+		}
 		c.FillRoundRect(ui.R(rr.X+16, rr.Y+14, 34, 34), 11, col.WithAlpha(26))
 		drawIcon(c, ui.R(rr.X+22, rr.Y+20, 22, 22), icon, col)
 		c.Text(ui.R(rr.X+58, rr.Y+14, rr.W-72, 22), title, 14, th.Text, ui.AlignLeft, true)

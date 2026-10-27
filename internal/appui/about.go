@@ -15,7 +15,7 @@ func (s *screens) aboutCat() *ui.Node {
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 112), feature{
 		icon: "book", title: "CODM Tune", info: true,
 		desc:  "Go + Win32/GDI+ 原生界面，独立进程悬浮窗；不注入游戏、不读写游戏内存、不结束或挂起 ACE。",
-		value: func() string { return "v10.0 · FIELD TERMINAL" },
+		value: func() string { return "v12.0 · FIELD TERMINAL" },
 		hint:  "安全边界",
 	}))
 
@@ -57,7 +57,7 @@ func (s *screens) aboutCat() *ui.Node {
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
 		icon: "monitor", title: "构建", info: true,
 		desc:  "UI：舟味工业终端 / 标准 MD3E；测量：DXGI + PDH；悬浮窗：独立 HUD 子进程。",
-		value: func() string { return "v10.0 · 2026-10" },
+		value: func() string { return "v12.0 · 2026-10" },
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 88), feature{
 		icon: "book", title: "免责声明", info: true,

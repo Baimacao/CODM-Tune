@@ -17,27 +17,27 @@ import (
 var shimBytes []byte
 
 type shimProcs struct {
-	dll        *syscall.LazyDLL
-	init       *syscall.LazyProc
-	shutdown   *syscall.LazyProc
-	canvasNew  *syscall.LazyProc
-	canvasFree *syscall.LazyProc
-	fillRect   *syscall.LazyProc
-	fillRound  *syscall.LazyProc
-	strokeRound *syscall.LazyProc
-	line       *syscall.LazyProc
-	circle     *syscall.LazyProc
+	dll          *syscall.LazyDLL
+	init         *syscall.LazyProc
+	shutdown     *syscall.LazyProc
+	canvasNew    *syscall.LazyProc
+	canvasFree   *syscall.LazyProc
+	fillRect     *syscall.LazyProc
+	fillRound    *syscall.LazyProc
+	strokeRound  *syscall.LazyProc
+	line         *syscall.LazyProc
+	circle       *syscall.LazyProc
 	strokeCircle *syscall.LazyProc
-	text       *syscall.LazyProc
-	measure    *syscall.LazyProc
-	pushClip   *syscall.LazyProc
-	popClip    *syscall.LazyProc
-	fontFamily *syscall.LazyProc
-	imageSize  *syscall.LazyProc
-	drawImage  *syscall.LazyProc
-	glyph      *syscall.LazyProc
-	scale      *syscall.LazyProc
-	view       *syscall.LazyProc
+	text         *syscall.LazyProc
+	measure      *syscall.LazyProc
+	pushClip     *syscall.LazyProc
+	popClip      *syscall.LazyProc
+	fontFamily   *syscall.LazyProc
+	imageSize    *syscall.LazyProc
+	drawImage    *syscall.LazyProc
+	glyph        *syscall.LazyProc
+	scale        *syscall.LazyProc
+	view         *syscall.LazyProc
 }
 
 var shim *shimProcs
@@ -53,27 +53,27 @@ func LoadUI() error {
 	}
 	dll := syscall.NewLazyDLL(path)
 	s := &shimProcs{
-		dll:         dll,
-		init:        dll.NewProc("gt_init"),
-		shutdown:    dll.NewProc("gt_shutdown"),
-		canvasNew:   dll.NewProc("gt_canvas_new"),
-		canvasFree:  dll.NewProc("gt_canvas_free"),
-		fillRect:    dll.NewProc("gt_fill_rect"),
-		fillRound:   dll.NewProc("gt_fill_round"),
-		strokeRound: dll.NewProc("gt_stroke_round"),
-		line:        dll.NewProc("gt_line"),
-		circle:      dll.NewProc("gt_circle"),
+		dll:          dll,
+		init:         dll.NewProc("gt_init"),
+		shutdown:     dll.NewProc("gt_shutdown"),
+		canvasNew:    dll.NewProc("gt_canvas_new"),
+		canvasFree:   dll.NewProc("gt_canvas_free"),
+		fillRect:     dll.NewProc("gt_fill_rect"),
+		fillRound:    dll.NewProc("gt_fill_round"),
+		strokeRound:  dll.NewProc("gt_stroke_round"),
+		line:         dll.NewProc("gt_line"),
+		circle:       dll.NewProc("gt_circle"),
 		strokeCircle: dll.NewProc("gt_stroke_circle"),
-		text:        dll.NewProc("gt_text"),
-		measure:     dll.NewProc("gt_measure"),
-		pushClip:    dll.NewProc("gt_push_clip"),
-		popClip:     dll.NewProc("gt_pop_clip"),
-		fontFamily:  dll.NewProc("gt_set_font_family"),
-		imageSize:   dll.NewProc("gt_image_size"),
-		drawImage:   dll.NewProc("gt_draw_image"),
-		glyph:       dll.NewProc("gt_glyph"),
-		scale:       dll.NewProc("gt_set_scale"),
-		view:        dll.NewProc("gt_set_view"),
+		text:         dll.NewProc("gt_text"),
+		measure:      dll.NewProc("gt_measure"),
+		pushClip:     dll.NewProc("gt_push_clip"),
+		popClip:      dll.NewProc("gt_pop_clip"),
+		fontFamily:   dll.NewProc("gt_set_font_family"),
+		imageSize:    dll.NewProc("gt_image_size"),
+		drawImage:    dll.NewProc("gt_draw_image"),
+		glyph:        dll.NewProc("gt_glyph"),
+		scale:        dll.NewProc("gt_set_scale"),
+		view:         dll.NewProc("gt_set_view"),
 	}
 	if r, _, e := s.init.Call(); r != 0 {
 		return fmt.Errorf("gt_init failed: %v", e)
@@ -352,11 +352,11 @@ func fileExists(path string) bool {
 
 // Surface is an offscreen 32-bit DIB with a memory DC and a Canvas.
 type Surface struct {
-	W, H  int
-	HDC   uintptr
-	Bmp   uintptr
-	Old   uintptr
-	Bits  unsafe.Pointer
+	W, H   int
+	HDC    uintptr
+	Bmp    uintptr
+	Old    uintptr
+	Bits   unsafe.Pointer
 	Canvas *Canvas
 }
 

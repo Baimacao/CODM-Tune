@@ -1,0 +1,39 @@
+20:15:27  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:15:27  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:15:27  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:16:02  首次引导完成
+20:16:03  已启动 D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe (pid 12652)
+20:16:07  检测到 CODM 运行 (pid 12652)
+20:16:07  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:19:26  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:19:27  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:19:27  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:19:37  检测到 CODM 运行 (pid 12652)
+20:19:37  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:21:02  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:21:02  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:21:03  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:21:12  检测到 CODM 运行 (pid 12652)
+20:21:12  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:22:04  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:22:04  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:22:04  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:22:14  检测到 CODM 运行 (pid 12652)
+20:22:14  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:23:48  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:23:48  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:23:48  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:23:58  检测到 CODM 运行 (pid 12652)
+20:23:58  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:25:08  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:25:08  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:25:08  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:25:18  检测到 CODM 运行 (pid 12652)
+20:25:18  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:26:45  CODMTune 启动 · 管理员=true · 逻辑核心=8
+20:26:45  自动探测到 CODM：D:\CODMGameApps\CN\emulator\Extract\CODM\CODM.exe
+20:26:45  电源：卓越性能已在用（31fb6af5-dcb9-4d96-9927-00f6ae099309），未改动
+20:26:55  检测到 CODM 运行 (pid 12652)
+20:26:55  系统调度：CODM pid 12652 → High，亲和性 0xFE
+20:55:55  CODM 已退出，恢复后台进程
+20:55:55  系统调度回滚：pid 12652

@@ -16,7 +16,7 @@ func (s *screens) inputCat() *ui.Node {
 	s.section(l, "鼠标")
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 100), feature{
 		icon: "mouse", title: "禁用 Windows 鼠标加速",
-		desc:   "写入 Control Panel\\Mouse 的三个阈值并立即 SPI_SETMOUSE；关闭增强指针精度，恢复原值。",
+		desc: "写入 Control Panel\\Mouse 的三个阈值并立即 SPI_SETMOUSE；关闭增强指针精度，恢复原值。",
 		value: func() string {
 			switch {
 			case s.c.MouseAccelOn():
@@ -39,8 +39,13 @@ func (s *screens) inputCat() *ui.Node {
 	s.section(l, "启动参数")
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
 		icon: "gamepad", title: "视角手感启动参数",
-		desc:   "-noforcemaccel -noforcemspd -useforcemparms；来源视频，引擎是否读取未在本机对局验证。",
-		value:  func() string { if s.c.HasLaunchToken("-noforcemaccel") { return "已附加" }; return "未附加" },
+		desc: "-noforcemaccel -noforcemspd -useforcemparms；来源视频，引擎是否读取未在本机对局验证。",
+		value: func() string {
+			if s.c.HasLaunchToken("-noforcemaccel") {
+				return "已附加"
+			}
+			return "未附加"
+		},
 		toggle: func() bool { return s.c.HasLaunchToken("-noforcemaccel") },
 		onToggle: func(on bool) {
 			s.c.SetLaunchToken("-noforcemaccel", on)
@@ -50,17 +55,23 @@ func (s *screens) inputCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
 		icon: "bolt", title: "Unity 渲染参数",
-		desc:   "-force-d3d11 可绕开部分 D3D12 驱动问题；把当前 LaunchArgs 显示在这里。",
-		value:  func() string { a := s.c.LaunchArgs(); if a == "" { return "无额外参数" }; return a },
-		toggle: func() bool { return s.c.HasLaunchToken("-force-d3d11") },
+		desc: "-force-d3d11 可绕开部分 D3D12 驱动问题；把当前 LaunchArgs 显示在这里。",
+		value: func() string {
+			a := s.c.LaunchArgs()
+			if a == "" {
+				return "无额外参数"
+			}
+			return a
+		},
+		toggle:   func() bool { return s.c.HasLaunchToken("-force-d3d11") },
 		onToggle: func(on bool) { s.c.SetLaunchToken("-force-d3d11", on) },
 	}))
 
 	s.section(l, "灵敏度")
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
 		icon: "gauge", title: "保存灵敏度快照",
-		desc:   "把所有含 sensitivity / ADS / fov 的值导出到 sensitivity-snapshot.json，调参前先存一份。",
-		value:  func() string { return "写入 " + tune.ConfigPath() + "\\sensitivity-snapshot.json" },
+		desc:  "把所有含 sensitivity / ADS / fov 的值导出到 sensitivity-snapshot.json，调参前先存一份。",
+		value: func() string { return "写入 " + tune.ConfigPath() + "\\sensitivity-snapshot.json" },
 		open: func() {
 			if n, err := s.c.SensitivitySnapshot(); err == nil {
 				s.c.LogLine(fmt.Sprintf("灵敏度快照：%d 个值", n))
@@ -69,9 +80,9 @@ func (s *screens) inputCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
 		icon: "shield", title: "还原灵敏度快照",
-		desc:   "把快照里的灵敏度/FOV 值写回；游戏运行中请先退出。",
-		value:  func() string { return "需已有快照" },
-		open:   func() { _, _ = s.c.RestoreSensitivity() },
+		desc:  "把快照里的灵敏度/FOV 值写回；游戏运行中请先退出。",
+		value: func() string { return "需已有快照" },
+		open:  func() { _, _ = s.c.RestoreSensitivity() },
 	}))
 	return root
 }

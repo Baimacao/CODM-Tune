@@ -23,15 +23,23 @@ type hudWindow struct {
 	hwnd    uintptr
 	surface *Surface
 	render  func(*Canvas)
+	digest  func() string
 	alpha   uint8
 	corner  string
 	visible bool
+	// sig is a cheap fingerprint of what the last painted frame showed. The
+	// timer fires at a fixed 2 Hz, but a repaint only happens when the text
+	// actually changed, so a static HUD costs one GDI+ pass every few
+	// seconds instead of five per second.
+	sig string
 }
 
 var gHUD *hudWindow
 
-// RunHUD creates the layered HUD and blocks in its message loop.
-func RunHUD(w, h int, render func(*Canvas)) error {
+// RunHUD creates the layered HUD and blocks in its message loop. digest
+// returns a short fingerprint of the currently rendered content: the 2 Hz timer
+// only repaints when the fingerprint changed, so an idle HUD is free.
+func RunHUD(w, h int, render func(*Canvas), digest func() string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := LoadUI(); err != nil {
@@ -63,7 +71,7 @@ func RunHUD(w, h int, render func(*Canvas)) error {
 		surf.Close()
 		return fmt.Errorf("hud window: %v", e)
 	}
-	gHUD = &hudWindow{hwnd: hwnd, surface: surf, render: render, alpha: 220, corner: "tr"}
+	gHUD = &hudWindow{hwnd: hwnd, surface: surf, render: render, digest: digest, alpha: 220, corner: "tr"}
 	HUDAlpha(220)
 	HUDPosition("tr")
 	pSetTimer.Call(hwnd, hudTimer, 200, 0)
@@ -92,7 +100,18 @@ func hudProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 	switch msg {
 	case WM_TIMER:
 		if wparam == hudTimer && o != nil && o.visible {
-			hudPaint(o)
+			// Repaint only when the numbers on screen actually changed.
+			// A HUD that is showing the same FPS/RTT as last tick produces
+			// no GDI+ work at all; this is what keeps it off the CPU while
+			// the game is running.
+			sig := ""
+			if o.digest != nil {
+				sig = o.digest()
+			}
+			if sig != o.sig || o.sig == "" {
+				o.sig = sig
+				hudPaint(o)
+			}
 		}
 		return 0
 	case WM_DESTROY:
@@ -132,6 +151,7 @@ func HUDShow(v bool) {
 	gHUD.visible = v
 	if v {
 		pShowWindow.Call(gHUD.hwnd, 4)
+		gHUD.sig = ""
 		hudPaint(gHUD)
 	} else {
 		pShowWindow.Call(gHUD.hwnd, SW_HIDE)

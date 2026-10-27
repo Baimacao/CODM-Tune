@@ -13,18 +13,18 @@ import (
 
 // Settings is the renderer's normalized crosshair model.
 type Settings struct {
-	Style       string `json:"style"`
-	Length      int    `json:"length"`
-	Thickness   int    `json:"thickness"`
-	Gap         int    `json:"gap"`
-	Color       string `json:"color"`
-	Alpha       int    `json:"alpha"`
-	Dot         bool   `json:"dot"`
-	Outline     bool   `json:"outline"`
-	OffsetX     int    `json:"offset_x"`
-	OffsetY     int    `json:"offset_y"`
-	Source      string `json:"source"`
-	Raw         string `json:"raw"`
+	Style     string `json:"style"`
+	Length    int    `json:"length"`
+	Thickness int    `json:"thickness"`
+	Gap       int    `json:"gap"`
+	Color     string `json:"color"`
+	Alpha     int    `json:"alpha"`
+	Dot       bool   `json:"dot"`
+	Outline   bool   `json:"outline"`
+	OffsetX   int    `json:"offset_x"`
+	OffsetY   int    `json:"offset_y"`
+	Source    string `json:"source"`
+	Raw       string `json:"raw"`
 }
 
 // Default returns a visible, non-invasive starting point.

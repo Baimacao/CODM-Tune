@@ -740,3 +740,67 @@ go test ./...   # 全 ok
 - 2026-10-23 实测启动 CODM（pid 3832）：HUD 进入 LIVE，FPS `—`，RTT 20–26 ms、jitter 1–8 ms；吞子弹风险按样本显示 0%（低延迟下的估算，不是命中判定）。
 - 托盘菜单实测：显示窗口、统计悬浮窗（已勾选）、辅助准心（已勾选）、打开配置目录、关于、退出；托盘提示条显示“CODM Tune · 已最小化到托盘”。
 - 准心在游戏/桌面上方可见；主程序关闭时子进程随之停止。
+
+# v12 追加验证（2026-10-27，turn 34：终末地风格 / 内存回收 / P0 降帧）
+
+## 68. 第三套界面风格「终末地 · 操作台」
+
+- `internal/ui/theme.go` 新增 `Endfield` / `EndfieldDark` 两套 Theme，`Theme.Mark` 字段只在 endfield 使用；`:230` `func (t *Theme) Industrial() bool { return t.Style == "ark" || t.Style == "endfield" }` 让两套工业语言共享几何开关。
+- 实机截图：纸白 STOCK `assets/endfield-stock.png`（侧栏酸柠选中块、切角主板、发丝线、`OPERATIONS / 14`、`SECTION 01`、`// 副标题`）、板黑 BOARD `assets/endfield-board.png`（同几何、灰底白字）。
+- 强调色只做填充：`01 概览` 选中块、`启动 CODM` 主按钮、`已就绪` 状态框、`CURRENT` 标签都是填充块；没有一处把酸柠当线条或文字色。
+- 切角只出现在可点击元素：`card()` 用 `cardCut` 画左上/右下切角，按钮用 `buttonCut`；普通信息行保持直角。
+- `SECTION` 标签曾与无边框标题栏的 32 px 不透明层重叠，字头被裁成虚线；已把标签与记录号整体下移到 y=38/50，截图确认完整。
+
+## 69. F11 横屏终端跟随风格
+
+- `internal/appui/terminal.go` 的配色改为从 `ui.CurrentTheme` 派生：endfield 用 `Bg/Outline/Muted/Text/Mark`，ark 用 `Bg/Outline/Muted/Text/Primary/Warn`，只有标准 MD3E 保留原来的霓虹绿控制台。
+- 面板底色改为 `CurrentTheme.Surface.WithAlpha(0xDD)`，分段条底改为 `Outline.WithAlpha(0x55)`。
+- 实机截图 `assets/endfield-terminal.png`：纸白底、墨色标题、酸柠 `[01 / SESSION]` 标签与状态字，网格与四角框线为浅灰，整体与主界面同一语言。
+
+## 70. 内存回收（对齐 Mem Reduct）
+
+- 兑现 `internal/tune/memory.go:66` `func (c *Control) RunMemory(mask sys.MemMask) MemState`；权限用 `sys.EnableMemPrivileges()`（`SeProfileSingleProcessPrivilege` + `SeIncreaseQuotaPrivilege`），只改本进程令牌。
+- 本机实测（16 GB 物理内存，管理员）：
+
+```
+verify mem-run   before=9192MB after=12292MB freed=3096MB runs=4 skipped=[]
+```
+
+- 一次回收释放 **3.02 GB**，可用从 8.98 GB 升到 12.00 GB；`skipped=[]` 表示五类清理全部成功。
+- `verify mem-stat` 输出 `avail=10518MB total=16259MB used=35% runs=4 auto=true interval=30 game=10`，即空闲 30 分钟、游戏时 10 分钟。
+- 回收只调用系统内存列表接口，不遍历进程、不结束进程、不碰 CODM 与 ACE。
+
+## 71. P0 降帧
+
+- 静止重绘频率 `IdleFPS`（10–60 Hz，默认 20）、游戏时 `GameIdleFPS`（5–30 Hz，默认 10）都是设置页可调项，`overlayDriver` 每 500 ms 把它们喂给 `win32.SetIdleInterval`。
+- 动画帧预算：`win32.SetFrameInterval(33)`，CODM 运行时 `66`（15 fps），页切换不会抢满一个核。
+- 隐藏到托盘时 `hideToTray()` 直接 `setTimer(0)` + `KillTimer`，完全停帧；`restore()` 用 `SW_RESTORE` 恢复并重新装表。
+- HUD 子进程固定 4 Hz（`internal/win32/hud.go:77` `SetTimer(hwnd, hudTimer, 200, 0)`），状态文件 250 ms 轮询但只在内容变化时重绘。
+- 本进程 `BELOW_NORMAL_PRIORITY_CLASS` + 让出 CPU 0。
+
+## 72. 资源实测（最终构建）
+
+```
+idle 20 s 采样（主进程 + 2 个子进程）
+24108  0.5% of one core   31.9 MB   (主进程)
+ 7276  0.2% of one core   15.8 MB   (--overlay)
+ 5908  0.0% of one core   15.6 MB   (--crosshair)
+合计约 0.7% CPU / 63 MB
+```
+
+- 三进程合计 63 MB，在 128 MB 预算内；比 v11 单进程 12 MB 增加的是 HUD 与准心两个独立子进程。
+- 静止 CPU 0.7%，全部来自 4 Hz HUD 与 20 Hz 主界面重绘；隐藏到托盘后应接近 0（未单独采样）。
+
+## 73. 构建
+
+```
+build.cmd       # 成功，bin\codmtune.exe 12,086,784 bytes
+go vet ./...    # 0
+go test ./...   # 全 ok
+```
+
+## 74. 未执行 / 边界
+
+- 内存回收的待机列表与注册表缓存两项在精简系统上可能返回 `STATUS_PRIVILEGE_NOT_HELD`，界面显示跳过项，工作集与文件缓存不受影响。
+- 终末地纸白在 150% DPI 下的 1 px 发丝线锐度待实机确认（当前按逻辑像素绘制）。
+- 游戏内 HUD（终末地主题下）与 FOV、ACE 共存仍需用户实机回归。

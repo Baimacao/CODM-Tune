@@ -138,7 +138,7 @@ func (s *screens) crosshairCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
 		icon: "monitor", title: "颜色",
-		desc: "预设 + 导入码 RGB；描边保证亮背景也看得清。",
+		desc:  "预设 + 导入码 RGB；描边保证亮背景也看得清。",
 		value: func() string { return s.c.Cfg().CrosshairColor + " · " + styleLabel },
 		open: func() {
 			s.crosshairChoices("crosshair", "准心颜色", "选择高对比预设；自定义可在 JSON 中写 #RRGGBB", s.c.Cfg().CrosshairColor, []choiceOption{
@@ -153,7 +153,7 @@ func (s *screens) crosshairCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 86), feature{
 		icon: "monitor", title: "线段长度",
-		desc: "← → 调节，范围 1–64 px；导入值会映射到此范围。",
+		desc:  "← → 调节，范围 1–64 px；导入值会映射到此范围。",
 		value: func() string { return fmt.Sprintf("%d px", s.c.Cfg().CrosshairLength) },
 		adjust: func(d int) {
 			s.c.Update(func(c *tune.Config) { c.CrosshairLength = clampInt(c.CrosshairLength+d*2, 1, 64) })
@@ -177,7 +177,7 @@ func (s *screens) crosshairCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 86), feature{
 		icon: "monitor", title: "不透明度",
-		desc: "← → 调节 40–255；在明亮场景可降到 120 左右。",
+		desc:  "← → 调节 40–255；在明亮场景可降到 120 左右。",
 		value: func() string { return fmt.Sprintf("%d / 255", s.c.Cfg().CrosshairAlpha) },
 		adjust: func(d int) {
 			s.c.Update(func(c *tune.Config) { c.CrosshairAlpha = clampInt(c.CrosshairAlpha+d*10, 40, 255) })
@@ -216,7 +216,7 @@ func (s *screens) crosshairCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 86), feature{
 		icon: "shield", title: "恢复默认",
-		desc: "恢复荧光绿十字、中心点、黑色描边；不会改动游戏设置。",
+		desc:  "恢复荧光绿十字、中心点、黑色描边；不会改动游戏设置。",
 		value: func() string { return "准心专用" },
 		open: func() {
 			d := crosshair.Default()

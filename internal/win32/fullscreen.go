@@ -7,10 +7,10 @@ import (
 )
 
 const (
-	wsPopup     = 0x80000000
-	wsVisible   = 0x10000000
-	swpNoZOrder = 0x0004
-	swpNoActivate = 0x0010
+	wsPopup         = 0x80000000
+	wsVisible       = 0x10000000
+	swpNoZOrder     = 0x0004
+	swpNoActivate   = 0x0010
 	swpFrameChanged = 0x0020
 )
 

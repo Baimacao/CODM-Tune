@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"codmtune/internal/hud"
+	"codmtune/internal/win32"
 )
 
 // overlayDriver hands the HUD state to the dedicated layered-window process.
@@ -14,6 +15,30 @@ func (s *screens) overlayDriver() {
 	for range tick.C {
 		cfg := s.c.Cfg()
 		d := s.c.OverlayData()
+		// Frame budget follows the workload this app actually has. Resting is
+		// 20 Hz; with CODM running it drops to 10 Hz, because a repaint that
+		// steals a timeslice from the renderer is worse than a slightly
+		// later label. Both are user-visible values on the 设置 page.
+		rest := cfg.IdleFPS
+		if rest < 10 || rest > 60 {
+			rest = 20
+		}
+		if d.Game {
+			rest = cfg.GameIdleFPS
+			if rest < 5 || rest > 30 {
+				rest = 10
+			}
+		}
+		win32.SetIdleInterval(1000 / rest)
+		// Animation budget. Idle already sleeps at the interval above; this
+		// only caps a frame in flight. 30 fps is enough for the spring
+		// transitions, and while CODM is running the app drops to 15 fps so
+		// that even a page switch cannot take a full core from the renderer.
+		frame := 33
+		if d.Game {
+			frame = 66
+		}
+		win32.SetFrameInterval(frame)
 		show := cfg.OverlayEnabled && (cfg.OverlayIdle || d.Game) && s.uiReady.Load()
 		if !show {
 			hud.EnsureChild(false)

@@ -20,10 +20,13 @@ func (s *screens) settingsCat() *ui.Node {
 	s.section(l, "外观")
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
 		icon: "shield", title: "界面风格",
-		desc: "标准 MD3E / 舟味工业终端：方角、编号、警示条、网格与扫描线。",
+		desc: "标准 MD3E / 舟味工业 / 终末地终端：三种几何语言，不只是换色。",
 		value: func() string {
-			if s.c.Cfg().Style == "ark" {
+			switch s.c.Cfg().Style {
+			case "ark":
 				return "舟味 · 工业终端"
+			case "endfield":
+				return "终末地 · 操作台"
 			}
 			return "标准 · MD3E"
 		},
@@ -32,6 +35,7 @@ func (s *screens) settingsCat() *ui.Node {
 			s.choose("settings", "界面风格", "风格会改变几何与装饰，不只是换色", s.c.Cfg().Style, []choiceOption{
 				{"standard", "标准 MD3E", "圆角、弹簧、lilt 动效"},
 				{"ark", "舟味 · 工业终端", "方角、编号、警示条、网格扫描线"},
+				{"endfield", "终末地 · 操作台", "纸白/板黑、切角、单一强调色只作填充"},
 			}, func(v string) {
 				s.c.Update(func(c *tune.Config) { c.Style = v })
 				s.retheme()
@@ -41,7 +45,7 @@ func (s *screens) settingsCat() *ui.Node {
 
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
 		icon: "gauge", title: "强调色",
-		desc:  "展开二级菜单；标准模式用预设，舟味模式仅壁纸色与高级红生效。",
+		desc:  "展开二级菜单；终末地风格里强调色只作填充块，不作线条或文字。",
 		value: func() string { return accentName(s.c.Cfg()) },
 		hint:  "Enter 展开",
 		open: func() {
@@ -52,6 +56,9 @@ func (s *screens) settingsCat() *ui.Node {
 				{"amber", "琥珀", "工业黄，适合深色"},
 				{"violet", "紫", "低饱和紫"},
 				{"red", "红", "危险/高级模式"},
+				{"cyan", "青", "终末地的技术青"},
+				{"lime", "酸柠", "高亮填充，用作当前位置"},
+				{"orange", "橙", "警示块"},
 				{"custom", "壁纸色", "从当前桌面壁纸取色"},
 			}, func(v string) {
 				hex := ""
@@ -95,9 +102,15 @@ func (s *screens) settingsCat() *ui.Node {
 
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
 		icon: "monitor", title: "主题",
-		desc: "舟味同样支持纸灰与墨黑；标准模式使用 MD3E / Astra 色板。",
+		desc: "舟味支持纸灰与墨黑；终末地只有纸白与板黑两套；标准模式使用 MD3E / Astra 色板。",
 		value: func() string {
 			cfg := s.c.Cfg()
+			if cfg.Style == "endfield" {
+				if cfg.Theme == "light" {
+					return "纸白 · STOCK"
+				}
+				return "板黑 · BOARD"
+			}
 			if cfg.Style == "ark" {
 				if cfg.Theme == "light" {
 					return "纸灰 · ARK LIGHT"
@@ -114,11 +127,28 @@ func (s *screens) settingsCat() *ui.Node {
 		},
 		hint: "Enter 展开",
 		open: func() {
-			s.choose("settings", "主题", "选择基础色板", s.c.Cfg().Theme, []choiceOption{
+			cfg := s.c.Cfg()
+			// The stock names differ per style because the palettes are not the
+			// same thing: ark has a paper-grey and an ink night, endfield has
+			// only stock-white and board-black, MD3E has three. Offering the
+			// shared list here would label a palette with another family's name.
+			opts := []choiceOption{
 				{"dark", "墨黑 / 深色", "高对比墨黑；舟味为工业夜场"},
 				{"light", "纸灰 / 浅色", "纸张灰白 + 深色文字"},
 				{"oled", "OLED Astra", "纯黑 + 薄荷，参考 Astra"},
-			}, func(v string) {
+			}
+			if cfg.Style == "endfield" {
+				opts = []choiceOption{
+					{"dark", "板黑 · BOARD", "板黑底 + 墨白字；强调色只做填充"},
+					{"light", "纸白 · STOCK", "纸白底 + 黑字；表格线用墨"},
+				}
+			} else if cfg.Style == "ark" {
+				opts = []choiceOption{
+					{"dark", "墨黑 · ARK DARK", "工业夜场；深底 + 危险红"},
+					{"light", "纸灰 · ARK LIGHT", "纸张灰白；等宽标签与斜切板"},
+				}
+			}
+			s.choose("settings", "主题", "选择基础色板", cfg.Theme, opts, func(v string) {
 				s.c.Update(func(c *tune.Config) { c.Theme = v })
 				s.retheme()
 			})
@@ -228,6 +258,54 @@ func (s *screens) settingsCat() *ui.Node {
 		},
 	}))
 
+	s.section(l, "性能")
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
+		icon: "gauge", title: "静止重绘频率",
+		desc: "没有动画时的刷新间隔。调低到 10 Hz 可显著减少空转 CPU；界面不会因此变慢，因为任何输入都会立刻恢复全速。",
+		value: func() string {
+			return fmt.Sprintf("%d Hz · 约 %d ms/帧", s.c.Cfg().IdleFPS, 1000/s.c.Cfg().IdleFPS)
+		},
+		adjust: func(d int) {
+			s.c.Update(func(c *tune.Config) {
+				c.IdleFPS += d * 5
+				if c.IdleFPS < 10 {
+					c.IdleFPS = 10
+				}
+				if c.IdleFPS > 60 {
+					c.IdleFPS = 60
+				}
+			})
+		},
+		progress: func() float64 { return float64(s.c.Cfg().IdleFPS-10) / 50 },
+	}))
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
+		icon: "gamepad", title: "游戏时重绘频率",
+		desc: "CODM 运行时的静止频率。CPU 很敏感时设 5–10 Hz：本工具只在内容变化时重绘，静止时不该占用核心。",
+		value: func() string {
+			return fmt.Sprintf("%d Hz · 约 %d ms/帧", s.c.Cfg().GameIdleFPS, 1000/s.c.Cfg().GameIdleFPS)
+		},
+		adjust: func(d int) {
+			s.c.Update(func(c *tune.Config) {
+				c.GameIdleFPS += d * 5
+				if c.GameIdleFPS < 5 {
+					c.GameIdleFPS = 5
+				}
+				if c.GameIdleFPS > 30 {
+					c.GameIdleFPS = 30
+				}
+			})
+		},
+		progress: func() float64 { return float64(s.c.Cfg().GameIdleFPS-5) / 25 },
+	}))
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
+		icon: "bolt", title: "进程优先级",
+		desc: "本工具始终以 BelowNormal 运行，并让出 CPU 0；这里只显示当前状态。",
+		value: func() string {
+			return "BelowNormal · 让出 CPU 0"
+		},
+		info: true,
+	}))
+
 	s.section(l, "音效")
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
 		icon: "gamepad", title: "界面音效",
@@ -301,6 +379,28 @@ func (s *screens) settingsCat() *ui.Node {
 }
 
 func accentName(c tune.Config) string {
+	if c.Style == "endfield" {
+		// In endfield the accent is one fill colour, and only five presets
+		// map to a real one; every other name falls through to the default
+		// acid yellow. Showing "蓝" while the UI paints yellow is a lie, so
+		// the label comes from the same table the renderer uses.
+		switch c.Accent {
+		case "cyan":
+			return "技术青"
+		case "lime":
+			return "酸柠"
+		case "orange":
+			return "橙"
+		case "mint":
+			return "薄荷"
+		case "custom":
+			if c.AccentHex != "" {
+				return "壁纸色 " + c.AccentHex
+			}
+			return "壁纸色"
+		}
+		return "酸柠黄（默认）"
+	}
 	switch c.Accent {
 	case "mint":
 		return "薄荷"
@@ -310,6 +410,12 @@ func accentName(c tune.Config) string {
 		return "紫"
 	case "red":
 		return "红"
+	case "cyan":
+		return "青"
+	case "lime":
+		return "酸柠"
+	case "orange":
+		return "橙"
 	case "custom":
 		if c.AccentHex != "" {
 			return "壁纸色 " + c.AccentHex

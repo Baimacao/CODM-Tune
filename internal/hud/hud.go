@@ -152,7 +152,7 @@ func Run() error {
 			load()
 		}
 	}()
-	return win32.RunHUD(int(320*scale), int(216*scale), draw)
+	return win32.RunHUD(int(320*scale), int(216*scale), draw, Digest)
 }
 
 func load() {

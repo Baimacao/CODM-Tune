@@ -262,7 +262,7 @@ func (c *Control) RestoreSensitivity() (int, error) {
 	return n, nil
 }
 
-func nowStamp() string { return time.Now().Format("2006-01-02 15:04:05") }
+func nowStamp() string      { return time.Now().Format("2006-01-02 15:04:05") }
 func timeFileStamp() string { return time.Now().Format("20060102-150405") }
 
 // ExclusiveShortcut creates a double-clickable launcher that asks Unity for

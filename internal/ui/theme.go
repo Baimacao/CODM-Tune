@@ -23,6 +23,8 @@ type Theme struct {
 	SuccessBg  Color
 	Warn       Color
 	WarnBg     Color
+	// Mark is the "here / act / look" block colour. Only endfield uses it.
+	Mark       Color
 	CardRadius float32
 	PillRadius float32
 	Style      string
@@ -162,6 +164,70 @@ var ArkDark = Theme{
 	Style:      "ark",
 	Dark:       true,
 }
+
+// Endfield is the industrial-terminal style: paper white, ink black and one
+// acid yellow that only ever fills a block. Corners stay square because a cut
+// corner means "pressable", and the yellow never becomes a line or a glyph —
+// on paper it would be invisible and on ink it would shout.
+var Endfield = Theme{
+	Bg:         RGB(0xF4, 0xF4, 0xF2),
+	Surface:    RGB(0xFF, 0xFF, 0xFF),
+	Surface2:   RGB(0xEC, 0xEC, 0xE8),
+	Surface3:   RGB(0xDF, 0xDF, 0xDA),
+	Outline:    RGB(0xD8, 0xD8, 0xD3),
+	Outline2:   RGB(0xA8, 0xA8, 0xA2),
+	Text:       RGB(0x16, 0x16, 0x16),
+	Muted:      RGB(0x6B, 0x6B, 0x66),
+	Primary:    RGB(0x16, 0x16, 0x16),
+	OnPrimary:  RGB(0xFF, 0xFF, 0xFF),
+	PrimaryDim: RGB(0x4A, 0x4A, 0x46),
+	PrimaryBg:  RGB(0xEC, 0xEC, 0xE8),
+	Tertiary:   RGB(0x5A, 0x5A, 0x55),
+	Danger:     RGB(0xB3, 0x26, 0x26),
+	DangerBg:   RGB(0xF2, 0xE4, 0xE4),
+	Success:    RGB(0x2C, 0x6B, 0x3F),
+	SuccessBg:  RGB(0xE4, 0xEE, 0xE6),
+	Warn:       RGB(0x7A, 0x5A, 0x00),
+	WarnBg:     RGB(0xFF, 0xFA, 0x00),
+	Mark:       RGB(0xFF, 0xFA, 0x00),
+	CardRadius: 0,
+	PillRadius: 0,
+	Style:      "endfield",
+}
+
+// EndfieldDark is the same terminal after dark: board-black stock, ink-white
+// type and the same acid yellow, which is the only colour allowed to shout.
+var EndfieldDark = Theme{
+	Bg:         RGB(0x19, 0x19, 0x19),
+	Surface:    RGB(0x22, 0x22, 0x22),
+	Surface2:   RGB(0x2B, 0x2B, 0x2B),
+	Surface3:   RGB(0x35, 0x35, 0x35),
+	Outline:    RGB(0x3A, 0x3A, 0x3A),
+	Outline2:   RGB(0x5C, 0x5C, 0x5C),
+	Text:       RGB(0xED, 0xED, 0xED),
+	Muted:      RGB(0x9A, 0x9A, 0x96),
+	Primary:    RGB(0xED, 0xED, 0xED),
+	OnPrimary:  RGB(0x16, 0x16, 0x16),
+	PrimaryDim: RGB(0xB4, 0xB4, 0xAF),
+	PrimaryBg:  RGB(0x2E, 0x2E, 0x2B),
+	Tertiary:   RGB(0xB8, 0xB8, 0xB2),
+	Danger:     RGB(0xE8, 0x6A, 0x5E),
+	DangerBg:   RGB(0x3A, 0x1C, 0x1A),
+	Success:    RGB(0x8F, 0xC9, 0x9E),
+	SuccessBg:  RGB(0x1D, 0x2E, 0x22),
+	Warn:       RGB(0xFF, 0xFA, 0x00),
+	WarnBg:     RGB(0x33, 0x30, 0x00),
+	Mark:       RGB(0xFF, 0xFA, 0x00),
+	CardRadius: 0,
+	PillRadius: 0,
+	Style:      "endfield",
+	Dark:       true,
+}
+
+// Industrial reports whether the style draws plates instead of cards: square
+// corners, numbered rules and 1 px separators. Ark and endfield share that
+// geometry and differ only in stock (paper vs ink) and signal colour.
+func (t *Theme) Industrial() bool { return t.Style == "ark" || t.Style == "endfield" }
 
 // CurrentTheme is the live palette every widget reads.
 var CurrentTheme = &Dark

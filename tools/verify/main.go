@@ -96,6 +96,17 @@ func main() {
 	case "sensitivity-restore":
 		n, err := c.RestoreSensitivity()
 		fmt.Printf("restored=%d err=%v\n", n, err)
+	case "mem-stat":
+		st := c.MemState()
+		fmt.Printf("avail=%dMB total=%dMB used=%d%% runs=%d auto=%v interval=%d game=%d note=%s\n",
+			st.Stat.Avail/1024/1024, st.Stat.Total/1024/1024, st.Stat.Percent,
+			st.Runs, st.Auto, st.Interval, c.Cfg().MemGameGap, st.Note)
+	case "mem-run":
+		before := c.MemStat()
+		st := c.RunMemory(sys.MemAll)
+		fmt.Printf("before=%dMB after=%dMB freed=%dMB runs=%d skipped=%v\n",
+			before.Avail/1024/1024, st.Stat.Avail/1024/1024,
+			st.LastFreed/1024/1024, st.Runs, st.Failed)
 	default:
 		fmt.Println("no command")
 		return

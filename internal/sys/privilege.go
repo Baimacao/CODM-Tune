@@ -34,13 +34,20 @@ const sePrivilegeEnabled = 0x00000002
 // only requested so ACE's own SGuard processes accept priority changes; no
 // memory access is performed with it.
 func EnableDebugPrivilege() error {
+	return enablePrivilege("SeDebugPrivilege")
+}
+
+// enablePrivilege turns on one named privilege for this process's own token.
+// A failure means the token does not hold it (usually: not elevated), and the
+// caller decides whether that is fatal for the feature.
+func enablePrivilege(priv string) error {
 	var token windows.Handle
 	r, _, e := pOpenProcessToken.Call(uintptr(windows.CurrentProcess()), tokenAdjustPrivileges|tokenQuery, uintptr(unsafe.Pointer(&token)))
 	if r == 0 {
 		return e
 	}
 	defer windows.CloseHandle(token)
-	name, _ := syscall.UTF16PtrFromString("SeDebugPrivilege")
+	name, _ := syscall.UTF16PtrFromString(priv)
 	var l tokenLuid
 	r, _, e = pLookupPrivilegeValueW.Call(0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(&l)))
 	if r == 0 {

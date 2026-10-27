@@ -22,7 +22,7 @@ func FixedDrives() []string {
 		p, _ := syscall.UTF16PtrFromString(letter + `:\`)
 		t, _, _ := pGetDriveTypeW.Call(uintptr(unsafePointer(p)))
 		if t == 3 { // DRIVE_FIXED
-			out = append(out, letter+`:`) 
+			out = append(out, letter+`:`)
 		}
 	}
 	for _, l := range order {

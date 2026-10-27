@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"codmtune/internal/hud"
 	"codmtune/internal/tune"
@@ -21,7 +22,17 @@ func (s *screens) section(l *ui.List, text string) {
 	n := ui.NewNode(ui.R(PadX, 0, RowW, 26))
 	n.Draw = func(n *ui.Node, c ui.Painter, r ui.Rect) {
 		th := ui.CurrentTheme
-		if th.Style == "ark" {
+		if th.Style == "endfield" {
+			// Record-row header: a solid acid tick, then // and a wide-tracked
+			// label. The rule underneath is ink, not acid — acid is a fill.
+			// It sits one pixel above the node edge so it never doubles up
+			// with the top border of the card below.
+			c.FillRect(ui.R(r.X, r.Y+9, 4, 12), th.Mark)
+			c.Text(ui.R(r.X+12, r.Y+8, r.W-40, 18), "// "+strings.ToUpper(text), 10, th.Text, ui.AlignLeft, true)
+			c.Line(r.X+12, r.Y+23, r.X+r.W, r.Y+23, 1, th.Outline)
+			return
+		}
+		if th.Industrial() {
 			c.FillRect(ui.R(r.X, r.Y+18, 3, 8), th.Primary)
 			c.Text(ui.R(r.X+12, r.Y+8, r.W-120, 18), "// "+strings.ToUpper(text), 10, th.Text, ui.AlignLeft, true)
 			for i := 0; i < 3; i++ {
@@ -190,6 +201,85 @@ func (s *screens) systemCat() *ui.Node {
 			onToggle: func(on bool) { s.c.SetTweak(t.id, on) },
 		}))
 	}
+
+	s.section(l, "内存回收（Mem Reduct 同源调用）")
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
+		icon: "bolt", title: "立即回收",
+		desc: "清空工作集、系统文件缓存、已修改页、待机列表与注册表缓存；只调用系统内存列表接口，不碰任何进程。",
+		value: func() string {
+			st := s.c.MemState()
+			if st.Runs == 0 {
+				return fmt.Sprintf("当前可用 %d MB · 从未执行", st.Stat.Avail/1024/1024)
+			}
+			return fmt.Sprintf("当前可用 %d MB · 上次释放 %d MB · 累计 %d 次",
+				st.Stat.Avail/1024/1024, st.LastFreed/1024/1024, st.Runs)
+		},
+		hint: "Enter 立即回收",
+		open: func() {
+			s.scanMsg = "正在回收内存…"
+			go func() {
+				st := s.c.RunMemory(0)
+				msg := fmt.Sprintf("回收完成 · 释放 %d MB · 可用 %d / %d MB",
+					st.LastFreed/1024/1024, st.Stat.Avail/1024/1024, st.Stat.Total/1024/1024)
+				if len(st.Failed) > 0 {
+					msg += " · 跳过 " + strings.Join(st.Failed, "/")
+				}
+				s.scanMsg = msg
+				s.app.Post(func() {})
+			}()
+		},
+	}))
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
+		icon: "gauge", title: "自动定期回收",
+		desc: "空闲按间隔执行；游戏运行时改用更短间隔。默认开启，间隔可调。",
+		value: func() string {
+			st := s.c.MemState()
+			if !st.Auto {
+				return "已关闭 · 仅手动"
+			}
+			next := "—"
+			if st.NextUnix > 0 {
+				next = time.Unix(st.NextUnix, 0).Format("15:04")
+			}
+			return fmt.Sprintf("%d 分钟 · 游戏时 %d 分钟 · 下次 %s", st.Interval, s.c.Cfg().MemGameGap, next)
+		},
+		toggle:   func() bool { return s.c.Cfg().MemAuto },
+		onToggle: func(on bool) { s.c.Update(func(c *tune.Config) { c.MemAuto = on }) },
+	}))
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
+		icon: "gauge", title: "空闲间隔",
+		desc:  "无游戏时的回收间隔。",
+		value: func() string { return fmt.Sprintf("%d 分钟", s.c.Cfg().MemInterval) },
+		adjust: func(d int) {
+			s.c.Update(func(c *tune.Config) {
+				c.MemInterval += d * 5
+				if c.MemInterval < 5 {
+					c.MemInterval = 5
+				}
+				if c.MemInterval > 240 {
+					c.MemInterval = 240
+				}
+			})
+		},
+		progress: func() float64 { return float64(s.c.Cfg().MemInterval-5) / 235 },
+	}))
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
+		icon: "gamepad", title: "游戏时间隔",
+		desc:  "CODM 运行时的回收间隔；内存紧张时更短的间隔更有意义。",
+		value: func() string { return fmt.Sprintf("%d 分钟", s.c.Cfg().MemGameGap) },
+		adjust: func(d int) {
+			s.c.Update(func(c *tune.Config) {
+				c.MemGameGap += d * 2
+				if c.MemGameGap < 2 {
+					c.MemGameGap = 2
+				}
+				if c.MemGameGap > 60 {
+					c.MemGameGap = 60
+				}
+			})
+		},
+		progress: func() float64 { return float64(s.c.Cfg().MemGameGap-2) / 58 },
+	}))
 
 	if cfg.Advanced {
 		s.section(l, "高级项（修改系统 / HKLM）")

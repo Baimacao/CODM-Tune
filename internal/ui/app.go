@@ -79,7 +79,7 @@ func (a *App) Switch(n *Node) {
 	}
 	h := &Screen{Content: n}
 	h.OX.SetSpring(spring.Smooth)
-	if a.Th.Style == "ark" {
+	if a.Th.Industrial() {
 		h.OX.Jump(0)
 		a.wipeOn = true
 		a.wipeT = 0
@@ -625,7 +625,7 @@ func (a *App) draw(c Painter) {
 		}
 		paint(h.Content, c, h.OX.Get(), 0)
 	}
-	if a.Th.Style == "ark" {
+	if a.Th.Industrial() {
 		if a.GridImage != "" {
 			if iw, ih := c.ImageSize(a.GridImage); iw > 0 && ih > 0 {
 				c.DrawImage(a.GridImage, Rect{0, 0, float32(a.W), float32(a.H)}, 255)

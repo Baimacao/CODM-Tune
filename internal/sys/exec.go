@@ -11,4 +11,3 @@ func HideWindow(cmd *exec.Cmd) {
 }
 
 func hideWindow(cmd *exec.Cmd) { HideWindow(cmd) }
-

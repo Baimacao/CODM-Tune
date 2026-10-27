@@ -177,7 +177,7 @@ func (c *Cursor) draw(cv Painter, th *Theme, f *Node, cut float32) {
 	if f != nil {
 		rad = f.CursorRadius()
 	}
-	if th.Style == "ark" {
+	if th.Industrial() {
 		rad = 2
 	}
 	// StrokeRoundRect centres its 2px stroke on the rect; inset by 1.5px so the

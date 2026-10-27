@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"codmtune/internal/sys"
 )
 
 // RegSnap is one saved registry value, used to make tweaks reversible.
@@ -109,6 +111,23 @@ type Config struct {
 	// Replay and knowledge.
 	ReplayDir    string `json:"replay_dir"`
 	KnowledgeDir string `json:"knowledge_dir"`
+
+	// System memory reclamation (Mem Reduct style). Auto mode runs off the
+	// game clock: a shorter interval while CODM is running, because that is
+	// when a fragmented standby list actually competes with the renderer.
+	MemAuto       bool  `json:"mem_auto"`
+	MemInterval   int   `json:"mem_interval"`      // idle minutes
+	MemGameGap    int   `json:"mem_game_interval"` // minutes while CODM runs
+	MemMask       int   `json:"mem_mask"`
+	MemLastUnix   int64 `json:"mem_last_unix"`
+	MemLastFreed  int64 `json:"mem_last_freed"`
+	MemTotalFreed int64 `json:"mem_total_freed"`
+	MemRuns       int   `json:"mem_runs"`
+
+	// Idle frame budget. The UI repaints only while content is moving; these
+	// two numbers decide how quickly it drops back after the last input.
+	IdleFPS     int `json:"idle_fps"`
+	GameIdleFPS int `json:"game_idle_fps"`
 }
 
 func defaultConfig() Config {
@@ -155,6 +174,12 @@ func defaultConfig() Config {
 		CrosshairOutline:   true,
 		TweakSnaps:         map[string][]RegSnap{},
 		Tweaks:             map[string]bool{},
+		MemAuto:            true,
+		MemInterval:        30,
+		MemGameGap:         10,
+		MemMask:            int(sys.MemAll),
+		IdleFPS:            20,
+		GameIdleFPS:        10,
 	}
 }
 
@@ -222,14 +247,16 @@ func loadConfig() Config {
 	if cfg.FOVWeapon < 50 || cfg.FOVWeapon > 140 {
 		cfg.FOVWeapon = 96
 	}
-	if cfg.Style != "ark" {
+	switch cfg.Style {
+	case "ark", "endfield":
+	default:
 		cfg.Style = "standard"
 	}
 	if cfg.Theme != "light" && cfg.Theme != "oled" {
 		cfg.Theme = "dark"
 	}
 	switch cfg.Accent {
-	case "mint", "amber", "violet", "red", "custom":
+	case "mint", "amber", "violet", "red", "cyan", "lime", "orange", "custom":
 	default:
 		cfg.Accent = "blue"
 	}
@@ -240,6 +267,9 @@ func loadConfig() Config {
 		if cfg.Radius < 2 || cfg.Radius > 34 {
 			cfg.Radius = 2
 		}
+	} else if cfg.Style == "endfield" {
+		// Square plates are the geometry; radius is not a knob here.
+		cfg.Radius = 0
 	} else if cfg.Radius < 10 || cfg.Radius > 34 {
 		cfg.Radius = 22
 	}
@@ -302,6 +332,21 @@ func loadConfig() Config {
 	if cfg.Tweaks == nil {
 		cfg.Tweaks = map[string]bool{}
 	}
+	if cfg.MemInterval < 5 || cfg.MemInterval > 240 {
+		cfg.MemInterval = 30
+	}
+	if cfg.MemGameGap < 2 || cfg.MemGameGap > 120 {
+		cfg.MemGameGap = 10
+	}
+	if cfg.MemMask <= 0 || cfg.MemMask > int(sys.MemAll) {
+		cfg.MemMask = int(sys.MemAll)
+	}
+	if cfg.IdleFPS < 10 || cfg.IdleFPS > 60 {
+		cfg.IdleFPS = 20
+	}
+	if cfg.GameIdleFPS < 5 || cfg.GameIdleFPS > 30 {
+		cfg.GameIdleFPS = 10
+	}
 	return cfg
 }
 
@@ -321,4 +366,3 @@ func saveConfig(cfg Config) error {
 	}
 	return os.Rename(tmp, path)
 }
-

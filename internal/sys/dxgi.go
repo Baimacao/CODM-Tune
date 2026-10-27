@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	pCoInitializeEx   = ole32DLL.NewProc("CoInitializeEx")
-	pCoUninitialize   = ole32DLL.NewProc("CoUninitialize")
+	pCoInitializeEx     = ole32DLL.NewProc("CoInitializeEx")
+	pCoUninitialize     = ole32DLL.NewProc("CoUninitialize")
 	pCreateDXGIFactory1 = syscall.NewLazyDLL("dxgi.dll").NewProc("CreateDXGIFactory1")
 )
 
@@ -23,14 +23,14 @@ const dxgiErrorNotFound = 0x887A0002
 
 // Adapter is one DXGI adapter as the game sees it.
 type Adapter struct {
-	Name           string
-	VendorID       uint32
-	DeviceID       uint32
-	DedicatedVRAM  uint64
-	SharedVRAM     uint64
-	LUIDHigh       int32
-	LUIDLow        uint32
-	Software       bool
+	Name          string
+	VendorID      uint32
+	DeviceID      uint32
+	DedicatedVRAM uint64
+	SharedVRAM    uint64
+	LUIDHigh      int32
+	LUIDLow       uint32
+	Software      bool
 }
 
 type luid struct {

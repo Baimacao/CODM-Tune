@@ -54,12 +54,32 @@ func (s *screens) terminal() *ui.Node {
 }
 
 func (s *screens) drawTerminal(c ui.Painter) {
+	// The terminal borrows the active palette. On the paper and board skins a
+	// neon-green console would read as a different product, so those two keep
+	// their own ink and use the accent only as a fill, exactly like the rest
+	// of the style.
+	th := ui.CurrentTheme
 	bg := ui.RGB(0x05, 0x08, 0x07)
 	grid := ui.RGBA(0x3D, 0x8B, 0x72, 0x22)
 	dim := ui.RGB(0x4C, 0x6B, 0x5E)
 	text := ui.RGB(0xD9, 0xE8, 0xDF)
 	green := ui.RGB(0x8B, 0xFF, 0xD9)
 	amber := ui.RGB(0xF2, 0xC9, 0x4C)
+	if th.Style == "endfield" {
+		bg = th.Bg
+		grid = th.Outline.WithAlpha(0x30)
+		dim = th.Muted
+		text = th.Text
+		green = th.Mark
+		amber = th.Text
+	} else if th.Style == "ark" {
+		bg = th.Bg
+		grid = th.Outline.WithAlpha(0x40)
+		dim = th.Muted
+		text = th.Text
+		green = th.Primary
+		amber = th.Warn
+	}
 
 	c.FillRect(ui.R(0, 0, termW, WinH), bg)
 	reveal := float32(1)
@@ -98,7 +118,7 @@ func (s *screens) drawTerminal(c ui.Painter) {
 
 	now := time.Now()
 	c.Text(ui.R(termW-360, 42, 312, 26), now.Format("2006-01-02  15:04:05"), 16, amber, ui.AlignRight, false)
-	c.Text(ui.R(termW-360, 70, 312, 18), "BUILD v10.0 · LANDSCAPE", 10, dim, ui.AlignRight, false)
+	c.Text(ui.R(termW-360, 70, 312, 18), "BUILD v12.0 · LANDSCAPE", 10, dim, ui.AlignRight, false)
 
 	game, _, _, running, _ := s.c.Game()
 	state := "STANDBY"
@@ -164,18 +184,18 @@ func (s *screens) drawTerminal(c ui.Painter) {
 	c.Text(ui.R(732, 550, 300, 18), "input is F11 only", 10, dim, ui.AlignLeft, false)
 
 	c.Text(ui.R(48, 646, 1000, 18), "NETWORK / POWER / FOV ARE READ-ONLY IN TERMINAL · F11 RETURNS TO THE SPRING CONSOLE", 9, dim, ui.AlignLeft, false)
-	c.Text(ui.R(48, 666, 1000, 18), "© CODMTUNE  ·  NO PROCESS MEMORY ACCESS  ·  NO ACE SUSPEND", 9, ui.RGBA(0x5A, 0x6A, 0x62, 0xFF), ui.AlignLeft, false)
+	c.Text(ui.R(48, 666, 1000, 18), "© CODMTUNE  ·  NO PROCESS MEMORY ACCESS  ·  NO ACE SUSPEND", 9, dim, ui.AlignLeft, false)
 	if reveal < 1 {
 		c.PopClip()
 		c.Line(termW*reveal, 0, termW*reveal, WinH, 2, green)
-		c.Line(termW*reveal-8, 0, termW*reveal-8, WinH, 1, ui.RGBA(0x8B, 0xFF, 0xD9, 0x55))
+		c.Line(termW*reveal-8, 0, termW*reveal-8, WinH, 1, ui.CurrentTheme.Outline)
 	}
 }
 
 func (s *screens) termPanel(c ui.Painter, x, y, w, h float32, title string, col ui.Color) {
 	r := ui.R(x, y, w, h)
-	c.FillRect(r, ui.RGBA(0x0A, 0x12, 0x0E, 0xDD))
-	c.Line(x, y, x+w, y, 1, ui.RGBA(0x8B, 0xFF, 0xD9, 0x55))
+	c.FillRect(r, ui.CurrentTheme.Surface.WithAlpha(0xDD))
+	c.Line(x, y, x+w, y, 1, ui.CurrentTheme.Outline)
 	c.Text(ui.R(x+16, y+10, w-32, 16), "["+title+"]", 9, col, ui.AlignLeft, true)
 }
 
@@ -186,12 +206,12 @@ func (s *screens) termBar(c ui.Painter, x, y, w float32, label string, frac floa
 	if frac > 1 {
 		frac = 1
 	}
-	c.Text(ui.R(x, y, 48, 16), label, 9, ui.RGB(0x4C, 0x6B, 0x5E), ui.AlignLeft, false)
+	c.Text(ui.R(x, y, 48, 16), label, 9, ui.CurrentTheme.Muted, ui.AlignLeft, false)
 	c.Text(ui.R(x+180, y, 80, 16), value, 10, col, ui.AlignRight, true)
 	segs := 22
 	for i := 0; i < segs; i++ {
 		sx := x + float32(i)*10
-		cc := ui.RGBA(0x8B, 0xFF, 0xD9, 0x33)
+		cc := ui.CurrentTheme.Outline.WithAlpha(0x55)
 		if float64(i+1)/float64(segs) <= frac {
 			cc = col
 		}

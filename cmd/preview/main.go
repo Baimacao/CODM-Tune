@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 
 	"codmtune/internal/appui"
+	"codmtune/internal/tune"
 	"codmtune/internal/ui"
 	"codmtune/internal/win32"
 )
@@ -29,6 +30,10 @@ type event struct {
 
 func main() {
 	out := flag.String("o", "preview", "output directory")
+	style := flag.String("style", "", "ui style override: standard | ark | endfield")
+	themeName := flag.String("theme", "", "theme override: dark | light | oled")
+	accent := flag.String("accent", "", "accent override")
+	allShots := flag.Bool("all", false, "write every shot as an individual png")
 	flag.Parse()
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fail(err)
@@ -49,10 +54,29 @@ func main() {
 	defer surf.Close()
 
 	app, ctrl := appui.NewHeadless()
+	dt := float32(1) / 60
+	if *style != "" || *themeName != "" || *accent != "" {
+		ctrl.Update(func(c *tune.Config) {
+			if *style != "" {
+				c.Style = *style
+			}
+			if *themeName != "" {
+				c.Theme = *themeName
+			}
+			if *accent != "" {
+				c.Accent = *accent
+			}
+		})
+		appui.Retheme(app, ctrl)
+		// Retheme rebuilds the screen through the normal switch path, which
+		// starts a wipe. Let it finish so the first capture is not clipped.
+		for i := 0; i < 90; i++ {
+			app.Frame(surf.Canvas, dt)
+		}
+	}
 	ctrl.Detect()
 
 	// Let detection finish so the capture shows the real install path.
-	dt := float32(1) / 60
 	for i := 0; i < 180; i++ {
 		app.Frame(surf.Canvas, dt)
 		exe, _, _, _, _ := ctrl.Game()
@@ -98,50 +122,57 @@ func main() {
 	var events []event
 	events = append(events, sh(0.30, "home"))
 	events = append(events, openNav(0.55, "settings")...)
-	events = append(events, sh(1.20, "settings"))
+	events = append(events, sh(1.55, "settings"))
+	// Walk down to the 主题 row (界面风格 / 强调色 / 从壁纸取色 / 主题) and open
+	// its chooser, so the capture shows a real second-level menu rather than
+	// the first focusable row doing something unrelated.
 	events = append(events,
-		mk(1.30, key(ui.KeyDown, ui.Press)),
-		mk(1.34, key(ui.KeyDown, ui.Release)),
-		mk(1.40, key(ui.KeyEnter, ui.Press)),
-		mk(1.48, key(ui.KeyEnter, ui.Release)),
-		sh(1.90, "settings-light"),
-		mk(2.00, key(ui.KeyEnter, ui.Press)),
-		mk(2.05, key(ui.KeyEnter, ui.Release)),
-		mk(2.12, key(ui.KeyEnter, ui.Press)),
-		mk(2.18, key(ui.KeyEnter, ui.Release)),
+		mk(1.65, key(ui.KeyDown, ui.Press)),
+		mk(1.69, key(ui.KeyDown, ui.Release)),
+		mk(1.75, key(ui.KeyDown, ui.Press)),
+		mk(1.79, key(ui.KeyDown, ui.Release)),
+		mk(1.85, key(ui.KeyDown, ui.Press)),
+		mk(1.89, key(ui.KeyDown, ui.Release)),
+		mk(1.95, key(ui.KeyEnter, ui.Press)),
+		mk(2.01, key(ui.KeyEnter, ui.Release)),
+		sh(2.75, "theme-choose"),
+		mk(2.85, key(ui.KeyBack, ui.Press)),
+		mk(2.90, key(ui.KeyBack, ui.Release)),
 	)
-	events = append(events, openNav(2.40, "visual")...)
-	events = append(events, sh(3.00, "visual"))
-	events = append(events, openNav(3.30, "performance")...)
+	events = append(events, openNav(3.10, "visual")...)
+	events = append(events, sh(4.05, "visual"))
+	events = append(events, openNav(4.25, "system")...)
+	events = append(events, sh(5.20, "system"))
+	events = append(events, openNav(5.40, "performance")...)
 	events = append(events,
-		sh(3.80, "performance"),
-		mk(4.00, key(ui.KeyDown, ui.Press)),
-		mk(4.08, key(ui.KeyDown, ui.Release)),
-		mk(4.20, key(ui.KeyEnter, ui.Press)),
-		sh(4.65, "hold-62"),
-		sh(5.20, "hold-95"),
-		mk(5.45, key(ui.KeyEnter, ui.Release)),
-		sh(5.65, "ace-fired"),
+		sh(6.30, "performance"),
+		mk(6.45, key(ui.KeyDown, ui.Press)),
+		mk(6.53, key(ui.KeyDown, ui.Release)),
+		mk(6.65, key(ui.KeyEnter, ui.Press)),
+		sh(7.10, "hold-62"),
+		sh(7.65, "hold-95"),
+		mk(7.90, key(ui.KeyEnter, ui.Release)),
+		sh(8.10, "ace-fired"),
 	)
-	events = append(events, openNav(5.90, "overlay")...)
-	events = append(events, sh(6.30, "overlay"))
-	events = append(events, openNav(6.55, "overview")...)
-	events = append(events, sh(7.00, "home-back"))
+	events = append(events, openNav(8.30, "overlay")...)
+	events = append(events, sh(9.25, "overlay"))
+	events = append(events, openNav(9.45, "overview")...)
+	events = append(events, sh(10.45, "home-back"))
 
 	var shots []image.Image
 	var names []string
 	gifFrames := []*image.Paletted{}
 	gifDelay := []int{}
-	const gifStart, gifEnd = 0.30, 6.85
+	const gifStart, gifEnd = 0.30, 10.05
 
 	frame := 0
 	next := 0
-	for t := float32(0); t < 7.4; t += dt {
+	for t := float32(0); t < 11.0; t += dt {
 		for next < len(events) && events[next].at <= t {
 			e := events[next]
 			if e.shot != "" {
 				img := toRGBA(surf.Pixels(), appui.WinW, appui.WinH)
-				if e.shot == "hold-62" || e.shot == "ace-fired" {
+				if *allShots || e.shot == "hold-62" || e.shot == "ace-fired" {
 					writePNG(filepath.Join(*out, e.shot+".png"), img)
 				}
 				shots = append(shots, img)

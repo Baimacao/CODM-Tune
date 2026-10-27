@@ -2,6 +2,7 @@ package hud
 
 import (
 	"fmt"
+	"strings"
 
 	"codmtune/internal/sys"
 	"codmtune/internal/ui"
@@ -140,6 +141,37 @@ func draw(c *win32.Canvas) {
 	}
 
 	hudText(c, st, ui.R(16, h-18, w-32, 12), "PresentMon · 估算值，不是命中判定", 7, th.Muted, ui.AlignLeft, false)
+}
+
+// Digest fingerprints exactly the values the HUD draws. The window timer runs
+// at 2 Hz but only repaints when this string changes, so a static overlay
+// performs no drawing at all.
+func Digest() string {
+	st := snapshot()
+	var b strings.Builder
+	fmt.Fprintf(&b, "%t|%t|%t|%.0f|%.0f|%.1f|%d|%d|%.0f|%t|%s|%s|%s|%d|%d|%d|%d|",
+		st.Show, st.Game, st.Ready, st.FPS, st.Low, st.Stutter, st.RTT, st.Jitter,
+		st.Loss, st.LossKnown, st.ServerIP, st.Province, st.Style, st.Opacity,
+		st.HudX, st.HudY, st.HudScale)
+	for _, v := range []bool{st.ShowFPS, st.ShowLow, st.ShowStut, st.ShowLoss, st.ShowText, st.ShowKeys, st.ShowNet, st.ShowProv} {
+		if v {
+			b.WriteByte('1')
+		} else {
+			b.WriteByte('0')
+		}
+	}
+	b.WriteString("|" + st.Theme)
+	if st.Style == "full" && st.ShowKeys {
+		// Held keys change the little key row; they are part of the picture.
+		for _, vk := range []int{0x57, 0x41, 0x53, 0x44, 0x10, 0x11, 0x20, 0x52} {
+			if sys.KeyDown(vk) {
+				b.WriteByte('1')
+			} else {
+				b.WriteByte('0')
+			}
+		}
+	}
+	return b.String()
 }
 
 // hudText keeps the HUD legible over bright game scenes in pure-text mode.

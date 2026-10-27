@@ -240,7 +240,7 @@ func (c *Control) refreshProcesses() {
 		ws, _ := sys.WorkingSet(pid)
 		pct := 0.0
 		if old, ok := prev[pid]; ok && now.After(old.at) {
-			d := float64(cpu-old.cpu) / (float64(now.Sub(old.at))/float64(time.Second)*1e7) / float64(sys.LogicalCPUs()) * 100
+			d := float64(cpu-old.cpu) / (float64(now.Sub(old.at)) / float64(time.Second) * 1e7) / float64(sys.LogicalCPUs()) * 100
 			if d >= 0 {
 				pct = d
 			}
@@ -939,7 +939,7 @@ func matchDriver(drivers map[string]string, name string) string {
 }
 
 var gpuModules = []struct {
-	key   string
+	key    string
 	advice string
 }{
 	{"nvlddmkm.sys", "NVIDIA 驱动超时恢复：更新驱动、关闭超频、检查供电与散热"},

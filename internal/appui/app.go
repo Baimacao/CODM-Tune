@@ -179,7 +179,27 @@ func (s *screens) newRoot(title, sub string) *ui.Node {
 func card(c ui.Painter, r ui.Rect, press float32, fill ui.Color) {
 	th := ui.CurrentTheme
 	rr := r.Inset(press * 2)
-	if th.Style == "ark" && th.CardRadius <= 6 {
+	if th.Style == "endfield" {
+		// Stock plate: flat paper/board, one ink hairline, one cut corner.
+		// No rounding and no shadow — both read as a different product.
+		c.FillRect(rr, fill)
+		c.Line(rr.X, rr.Y, rr.X+rr.W, rr.Y, 1, th.Outline)
+		c.Line(rr.X, rr.Bottom(), rr.X+rr.W, rr.Bottom(), 1, th.Outline)
+		c.Line(rr.X, rr.Y, rr.X, rr.Bottom(), 1, th.Outline)
+		c.Line(rr.X+rr.W, rr.Y, rr.X+rr.W, rr.Bottom(), 1, th.Outline)
+		const cut = 10
+		for i := 0; i < cut; i++ {
+			c.FillRect(ui.R(rr.X+rr.W-1-float32(i), rr.Y+float32(i), 1, 1), th.Bg)
+			c.FillRect(ui.R(rr.X+rr.W-1-float32(i), rr.Y+float32(i)+1, 1, 1), th.Bg)
+		}
+		c.Line(rr.X+rr.W-cut, rr.Y, rr.X+rr.W-cut, rr.Y+cut, 1, th.Outline)
+		c.Line(rr.X+rr.W-cut, rr.Y+cut, rr.X+rr.W, rr.Y+cut, 1, th.Outline)
+		if th.Advanced {
+			c.FillRect(ui.R(rr.X, rr.Y, rr.W-cut, 3), th.Danger)
+		}
+		return
+	}
+	if th.Industrial() && th.CardRadius <= 6 {
 		c.FillRect(rr, fill)
 		c.Line(rr.X, rr.Y, rr.X+rr.W, rr.Y, 1, th.Outline2)
 		c.Line(rr.X, rr.Bottom(), rr.X+rr.W, rr.Bottom(), 1, th.Outline)
@@ -209,6 +229,25 @@ func card(c ui.Painter, r ui.Rect, press float32, fill ui.Color) {
 
 // chip draws a small status pill with a leading dot.
 func chip(c ui.Painter, r ui.Rect, text string, col ui.Color) {
+	th := ui.CurrentTheme
+	if th.Style == "endfield" {
+		// A status tag is a stamped block, never a pill: pill radii belong to
+		// the MD3E family and this family has none. Warning is a mark block
+		// with ink type (red is reserved for destructive rows); a settled
+		// state is a hairline box. Nothing here may be a coloured line.
+		ink := ui.RGB(0x16, 0x16, 0x16)
+		if col == th.Danger {
+			c.FillRect(r, th.Mark)
+			c.Text(ui.R(r.X+10, r.Y, r.W-12, r.H), text, 11, ink, ui.AlignLeft, true)
+			return
+		}
+		c.Line(r.X, r.Y, r.Right(), r.Y, 1, th.Outline2)
+		c.Line(r.X, r.Bottom(), r.Right(), r.Bottom(), 1, th.Outline2)
+		c.Line(r.X, r.Y, r.X, r.Bottom(), 1, th.Outline2)
+		c.Line(r.Right(), r.Y, r.Right(), r.Bottom(), 1, th.Outline2)
+		c.Text(ui.R(r.X+10, r.Y, r.W-12, r.H), text, 11, th.Text, ui.AlignLeft, true)
+		return
+	}
 	c.FillRoundRect(r, r.H/2, col.WithAlpha(30))
 	c.Circle(r.X+r.H/2, r.Y+r.H/2, 3, col)
 	c.Text(ui.R(r.X+r.H/2+10, r.Y, r.W-r.H/2-14, r.H), text, 12, col, ui.AlignLeft, true)
@@ -230,7 +269,30 @@ func (s *screens) button(r ui.Rect, label string, style btnStyle, onClick func()
 		p := n.Press.Get()
 		rr = rr.Inset(p * 2)
 		th := ui.CurrentTheme
-		if th.Style == "ark" {
+		if th.Style == "endfield" {
+			// Cut-corner action plate: the shape itself says "pressable".
+			const cut = 8
+			c.FillRect(rr, th.Surface2)
+			switch style {
+			case btnPrimary:
+				c.FillRect(ui.R(rr.X, rr.Y, rr.W-cut, rr.H), th.Mark)
+				c.Text(ui.R(rr.X, rr.Y, rr.W-cut-6, rr.H), label, 14, th.OnPrimary, ui.AlignCenter, true)
+			case btnDanger:
+				c.FillRect(rr, th.DangerBg)
+				c.Text(ui.R(rr.X, rr.Y, rr.W-cut, rr.H), label, 13, th.Danger, ui.AlignCenter, true)
+			default:
+				c.Text(ui.R(rr.X, rr.Y, rr.W-cut, rr.H), label, 13, th.Text, ui.AlignCenter, false)
+			}
+			for i := 0; i < cut; i++ {
+				c.FillRect(ui.R(rr.X+rr.W-1-float32(i), rr.Y+float32(i), 1, 1), th.Bg)
+				c.FillRect(ui.R(rr.X+rr.W-1-float32(i), rr.Bottom()-1-float32(i), 1, 1), th.Bg)
+			}
+			c.Line(rr.X, rr.Y, rr.X+rr.W-cut, rr.Y, 1, th.Outline)
+			c.Line(rr.X, rr.Bottom(), rr.X+rr.W-cut, rr.Bottom(), 1, th.Outline)
+			c.Line(rr.X, rr.Y, rr.X, rr.Bottom(), 1, th.Outline)
+			return
+		}
+		if th.Industrial() {
 			switch style {
 			case btnPrimary:
 				c.FillRect(rr, th.Primary)
@@ -328,7 +390,26 @@ func (s *screens) toggle(r ui.Rect, get func() bool) (*ui.Node, *toggleVis) {
 	n.Draw = func(_ *ui.Node, c ui.Painter, rr ui.Rect) {
 		on := v.knob.Get()
 		th := ui.CurrentTheme
-		if th.Style == "ark" {
+		if th.Style == "endfield" {
+			// A switch here is a stamped checkbox, not a slider: filled acid
+			// block for on, hairline box for off. The state has to read from
+			// across the room, and a moving knob does not.
+			box := ui.R(rr.X+2, rr.Y+(rr.H-22)/2, 22, 22)
+			if on > 0.5 {
+				c.FillRect(box, th.Mark)
+				c.Line(box.X+5, box.Y+11, box.X+9, box.Y+16, 2, ui.RGB(0x16, 0x16, 0x16))
+				c.Line(box.X+9, box.Y+16, box.X+17, box.Y+5, 2, ui.RGB(0x16, 0x16, 0x16))
+				c.Text(ui.R(box.Right()+8, rr.Y, 40, rr.H), "ON", 10, th.Text, ui.AlignLeft, true)
+			} else {
+				c.Line(box.X, box.Y, box.Right(), box.Y, 1, th.Outline2)
+				c.Line(box.X, box.Bottom(), box.Right(), box.Bottom(), 1, th.Outline2)
+				c.Line(box.X, box.Y, box.X, box.Bottom(), 1, th.Outline2)
+				c.Line(box.Right(), box.Y, box.Right(), box.Bottom(), 1, th.Outline2)
+				c.Text(ui.R(box.Right()+8, rr.Y, 40, rr.H), "OFF", 10, th.Muted, ui.AlignLeft, false)
+			}
+			return
+		}
+		if th.Industrial() {
 			track := ui.R(rr.X, rr.Y+(rr.H-22)/2, 52, 22)
 			c.FillRect(track, th.Surface3)
 			c.Line(track.X, track.Y, track.X+track.W, track.Y, 1, th.Outline2)

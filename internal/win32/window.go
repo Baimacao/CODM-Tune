@@ -18,6 +18,39 @@ const (
 	timerTick   = 1
 )
 
+// frameMS is the visible-window frame budget. The app drops to 30 fps while
+// CODM is running; a hidden window already stops its timer entirely.
+var frameMS int64 = 16
+
+// idleMS is the budget used once every spring has settled and nothing was
+// redrawn. It is the number that decides what an "idle" app costs: at 140 ms
+// the window still wakes seven times a second for no visible change, which is
+// real CPU time on a machine that is trying to render a game.
+var idleMS int64 = 140
+
+func SetFrameInterval(ms int) {
+	if ms < 16 {
+		ms = 16
+	}
+	if ms > 1000 {
+		ms = 1000
+	}
+	frameMS = int64(ms)
+}
+
+// SetIdleInterval sets the settled-state repaint budget. Values are clamped to
+// 50..2000 ms: faster than 20 Hz is pointless when nothing animates, and slower
+// than 0.5 Hz makes the app feel frozen when it is restored from the tray.
+func SetIdleInterval(ms int) {
+	if ms < 50 {
+		ms = 50
+	}
+	if ms > 2000 {
+		ms = 2000
+	}
+	idleMS = int64(ms)
+}
+
 type window struct {
 	hwnd       uintptr
 	surface    *Surface
@@ -188,9 +221,9 @@ func (w *window) tick() {
 		w.present()
 	}
 	if spring.Awake() == 0 && !drew {
-		w.setTimer(140)
+		w.setTimer(int(idleMS))
 	} else {
-		w.setTimer(16)
+		w.setTimer(int(frameMS))
 	}
 }
 
@@ -222,7 +255,7 @@ func (w *window) restore() {
 	w.last = time.Now()
 	pShowWindow.Call(w.hwnd, 9) // SW_RESTORE: SW_SHOW alone leaves a minimized window minimized
 	pSetForegroundWindow.Call(w.hwnd)
-	w.setTimer(16)
+	w.setTimer(int(frameMS))
 }
 
 func (w *window) addTray() {
@@ -359,7 +392,7 @@ func wndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 	case WM_APP_TICK:
 		w.last = time.Now()
-		w.setTimer(16)
+		w.setTimer(int(frameMS))
 		w.tick()
 		return 0
 	case WM_SIZE:

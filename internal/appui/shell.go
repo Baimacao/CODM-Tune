@@ -37,10 +37,15 @@ var navItems = []navItem{
 func (s *screens) rail(root *ui.Node) {
 	th := ui.CurrentTheme
 	root.Draw = func(n *ui.Node, c ui.Painter, r ui.Rect) {
-		if th.Style == "ark" {
+		if th.Industrial() {
 			c.FillRect(ui.R(0, 0, RailW, WinH), th.Bg)
 			c.Line(RailW, 0, RailW, WinH, 1, th.Outline2)
-			if th.Dark {
+			if th.Style == "endfield" {
+				// Ink stock block: the mark itself is never used as a fill
+				// here, so the acid colour stays reserved for position and
+				// actions further down the rail.
+				c.FillRect(ui.R(10, 10, 42, 42), th.Text)
+			} else if th.Dark {
 				c.FillRect(ui.R(10, 10, 42, 42), th.PrimaryDim)
 				c.Line(10, 10, 52, 10, 2, th.Text)
 			} else {
@@ -56,16 +61,26 @@ func (s *screens) rail(root *ui.Node) {
 				c.FillRoundRect(ui.R(10, 10, 42, 42), 12, th.Primary)
 			}
 		}
-		if p := logoMark(); p != "" {
-			c.DrawImage(p, ui.R(13, 13, 36, 36), 255)
+		logoPath := logoMark() // white silhouette
+		if th.Style == "endfield" && th.Dark {
+			// Endfield's dark stock paints an ink block, so the mark has to
+			// flip to the black silhouette; the white one would vanish.
+			logoPath = logoInk()
+		}
+		if logoPath != "" {
+			c.DrawImage(logoPath, ui.R(13, 13, 36, 36), 255)
 		} else {
 			drawLogo(c, ui.R(16, 18, 30, 26), th.Primary)
 		}
 		name := "CODM TUNE"
-		sub := "MD3E · v10"
-		if th.Style == "ark" {
+		sub := "MD3E · v12"
+		if th.Industrial() {
 			name = "CODM//TUNE"
 			sub = fmt.Sprintf("ARMORY SYSTEM / %02d", len(navItems))
+		}
+		if th.Style == "endfield" {
+			name = "CODM TUNE"
+			sub = fmt.Sprintf("OPERATIONS / %02d", len(navItems))
 		}
 		c.Text(ui.R(60, 18, 132, 22), name, 15, th.Text, ui.AlignLeft, true)
 		c.Text(ui.R(60, 40, 132, 18), sub, 10, th.Muted, ui.AlignLeft, false)
@@ -90,7 +105,28 @@ func (s *screens) rail(root *ui.Node) {
 			if active {
 				col = th.Primary
 			}
-			if th.Style == "ark" {
+			if th.Industrial() {
+				if th.Style == "endfield" {
+					// Current position is a solid mark block with ink type;
+					// everything else is a numbered record row on hairlines.
+					iconCol := th.Muted
+					numCol := th.Muted
+					labelCol := th.Muted
+					if active {
+						c.FillRect(rr, th.Mark)
+						iconCol = ui.RGB(0x16, 0x16, 0x16)
+						numCol = ui.RGB(0x16, 0x16, 0x16)
+						labelCol = ui.RGB(0x16, 0x16, 0x16)
+					}
+					num := fmt.Sprintf("%02d", i+1)
+					c.Text(ui.R(rr.X+8, rr.Y+12, 24, 16), num, 9, numCol, ui.AlignLeft, true)
+					drawIcon(c, ui.R(rr.X+34, rr.Y+12, 16, 16), it.icon, iconCol)
+					c.Text(ui.R(rr.X+58, rr.Y, rr.W-64, rr.H), it.label, 12, labelCol, ui.AlignLeft, active)
+					if !active {
+						c.Line(rr.X+58, rr.Bottom()-1, rr.X+rr.W, rr.Bottom()-1, 1, th.Outline)
+					}
+					return
+				}
 				if active {
 					c.FillRect(rr, th.Surface2)
 					c.FillRect(ui.R(rr.X, rr.Y, 3, rr.H), th.Primary)
@@ -116,7 +152,32 @@ func (s *screens) rail(root *ui.Node) {
 func (s *screens) headerDraw(c ui.Painter, r ui.Rect) {
 	th := ui.CurrentTheme
 	title, sub := s.title, s.sub
-	if th.Style == "ark" {
+	if th.Style == "endfield" {
+		// Wide-tracked Latin label over a bold Chinese line, with the record
+		// number as the only acid block on the page.
+		c.FillRect(ui.R(PadX, 22, 5, 32), th.Mark)
+		c.Text(ui.R(PadX+14, 20, 700, 34), title, 26, th.Text, ui.AlignLeft, true)
+		c.Text(ui.R(PadX+14, 62, 760, 20), "// "+sub, 12, th.Muted, ui.AlignLeft, false)
+		num := fmt.Sprintf("%02d", navNumber(s.active))
+		// The borderless chrome paints an opaque 32 px strip in the window's
+		// top-right corner, so the record label starts below it; otherwise the
+		// strip clips the glyph tops into a dashed line.
+		c.Text(ui.R(PadX+Wide-92, 38, 92, 12), "SECTION", 8, th.Muted, ui.AlignRight, true)
+		c.Text(ui.R(PadX+Wide-92, 50, 92, 30), num, 24, th.Text, ui.AlignRight, true)
+		c.Line(PadX, 100, PadX+Wide, 100, 1, th.Outline)
+		c.Line(PadX, FootY, PadX+Wide, FootY, 1, th.Outline)
+		if th.Advanced {
+			for x := float32(PadX); x < PadX+Wide; x += 12 {
+				c.FillRect(ui.R(x, 96, 6, 4), th.Danger)
+			}
+		}
+		c.Text(ui.R(PadX, FootY+8, Wide-360, 20), "↑↓ 移动 · Enter 确认 / 按住 · ←→ 调节 · Esc 返回 · 滚轮滚动", 11, th.Muted, ui.AlignLeft, false)
+		tool := s.c.Tool()
+		right := "自身 " + fmtPct(tool.CPU) + " CPU · " + fmtMB(tool.MemMB) + " · ACE " + itoa(tool.ACECnt)
+		c.Text(ui.R(PadX+Wide-350, FootY+8, 350, 20), right, 11, th.Muted, ui.AlignRight, false)
+		return
+	}
+	if th.Industrial() {
 		title = "// " + title
 		sub = "> " + sub
 		c.FillRect(ui.R(PadX, 20, 4, 34), th.Primary)
@@ -132,7 +193,7 @@ func (s *screens) headerDraw(c ui.Painter, r ui.Rect) {
 	}
 	c.Line(PadX, 100, PadX+Wide, 100, 1, th.Outline)
 	c.Line(PadX, FootY, PadX+Wide, FootY, 1, th.Outline)
-	if th.Style == "ark" {
+	if th.Industrial() {
 		// Large section numeral: the reference UI leans on one oversized
 		// circular index instead of decorative chips.
 		cx, cy := float32(PadX+Wide-60), float32(58)
@@ -291,11 +352,23 @@ func (s *screens) featureRow(r ui.Rect, f feature) *ui.Node {
 		if f.tone != nil {
 			iconCol = colorOf(f.tone())
 		}
-		c.FillRoundRect(ui.R(rr.X+16, rr.Y+16, 38, 38), 12, iconCol.WithAlpha(26))
-		drawIcon(c, ui.R(rr.X+23, rr.Y+23, 24, 24), f.icon, iconCol)
 		title := f.title
-		if th.Style == "ark" {
-			title = "▌ " + title
+		if th.Style == "endfield" {
+			// Hairline square plate and ink glyph; the accent is spent on the
+			// status mark below, not on a tinted plate. Rounded plates would
+			// read as the MD3E family.
+			pr := ui.R(rr.X+16, rr.Y+16, 38, 38)
+			c.Line(pr.X, pr.Y, pr.Right(), pr.Y, 1, th.Outline2)
+			c.Line(pr.X, pr.Bottom(), pr.Right(), pr.Bottom(), 1, th.Outline2)
+			c.Line(pr.X, pr.Y, pr.X, pr.Bottom(), 1, th.Outline2)
+			c.Line(pr.Right(), pr.Y, pr.Right(), pr.Bottom(), 1, th.Outline2)
+			drawIcon(c, ui.R(rr.X+24, rr.Y+24, 22, 22), f.icon, th.Text)
+		} else {
+			c.FillRoundRect(ui.R(rr.X+16, rr.Y+16, 38, 38), 12, iconCol.WithAlpha(26))
+			drawIcon(c, ui.R(rr.X+23, rr.Y+23, 24, 24), f.icon, iconCol)
+			if th.Industrial() {
+				title = "▌ " + title
+			}
 		}
 		c.Text(ui.R(rr.X+66, rr.Y+12, rr.W-150, 24), title, 15, th.Text, ui.AlignLeft, true)
 		if f.value != nil {
@@ -322,11 +395,25 @@ func (s *screens) featureRow(r ui.Rect, f feature) *ui.Node {
 			}
 		}
 		if hint != "" {
-			c.Text(ui.R(rr.Right()-190, rr.Y+56, 170, 18), hint, 10, th.PrimaryDim, ui.AlignRight, false)
+			hc := th.PrimaryDim
+			if th.Style == "endfield" {
+				// The accent is a fill in this style, never type: a yellow
+				// hint label would spend the "act" colour on plain text.
+				hc = th.Muted
+			}
+			c.Text(ui.R(rr.Right()-190, rr.Y+56, 170, 18), hint, 10, hc, ui.AlignRight, false)
 		}
 		if f.hold > 0 && (n.Holding || n.HoldFired) {
 			w := (rr.W - 40) * n.Progress.Get()
-			c.FillRoundRect(ui.R(rr.X+20, rr.Bottom()-7, w, 3), 1.5, th.Primary)
+			if th.Style == "endfield" {
+				// Hold progress is an action, so it is the one place where the
+				// accent is allowed to be a solid block. A hairline in ink
+				// would be invisible against the card edge and the user would
+				// have no idea how much longer to press.
+				c.FillRect(ui.R(rr.X+20, rr.Bottom()-6, w, 4), th.Mark)
+			} else {
+				c.FillRoundRect(ui.R(rr.X+20, rr.Bottom()-7, w, 3), 1.5, th.Primary)
+			}
 		}
 		if f.adjust != nil && f.progress != nil {
 			frac := f.progress()
@@ -339,9 +426,18 @@ func (s *screens) featureRow(r ui.Rect, f feature) *ui.Node {
 			tx := rr.X + 20
 			tw := rr.W - 40
 			ty := rr.Bottom() - 10
-			c.FillRoundRect(ui.R(tx, ty, tw, 4), 2, th.Outline)
-			c.FillRoundRect(ui.R(tx, ty, tw*float32(frac), 4), 2, th.Primary)
-			c.Circle(tx+tw*float32(frac), ty+2, 6, th.Primary)
+			if th.Style == "endfield" {
+				// A square trough with a square filled run; the knob is a
+				// taller marker, not a circle. Circles are the MD3E family
+				// and would break the plate geometry.
+				c.FillRect(ui.R(tx, ty, tw, 2), th.Outline2)
+				c.FillRect(ui.R(tx, ty-1, tw*float32(frac), 4), th.Mark)
+				c.FillRect(ui.R(tx+tw*float32(frac)-1, ty-5, 2, 12), th.Text)
+			} else {
+				c.FillRoundRect(ui.R(tx, ty, tw, 4), 2, th.Outline)
+				c.FillRoundRect(ui.R(tx, ty, tw*float32(frac), 4), 2, th.Primary)
+				c.Circle(tx+tw*float32(frac), ty+2, 6, th.Primary)
+			}
 		}
 	}
 	switch {

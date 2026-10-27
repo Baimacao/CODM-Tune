@@ -15,7 +15,7 @@ import (
 // layer. The frame loop used to issue ~430 GDI lines per redraw, which made a
 // single repaint cost tens of milliseconds.
 func ensureArkGrid(th *ui.Theme) string {
-	if th.Style != "ark" {
+	if !th.Industrial() {
 		return ""
 	}
 	w, h := WinW, WinH

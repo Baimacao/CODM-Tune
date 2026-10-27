@@ -340,6 +340,7 @@ func (c *Control) Start() {
 	go c.monitor()
 	go c.bgLoop()
 	go c.overlayLoop()
+	go c.memLoop()
 	go c.startupPower()
 }
 

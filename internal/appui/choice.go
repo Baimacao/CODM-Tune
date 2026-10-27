@@ -1,6 +1,8 @@
 package appui
 
 import (
+	"fmt"
+
 	"codmtune/internal/ui"
 )
 
@@ -15,15 +17,32 @@ type choiceOption struct {
 func (s *screens) choicePage(parent, title, sub, current string, opts []choiceOption, pick func(string)) *ui.Node {
 	root := s.cat(parent, title, sub)
 	l := s.listIn(root)
-	for _, opt := range opts {
+	for i, opt := range opts {
 		opt := opt
+		idx := i
 		n := ui.NewNode(ui.R(PadX, 0, RowW, 66))
 		n.Focusable = true
 		n.Data = "choice:" + opt.Value
 		n.Draw = func(n *ui.Node, c ui.Painter, r ui.Rect) {
 			th := ui.CurrentTheme
-			c.FillRoundRect(r, th.CardRadius, th.Surface)
 			selected := opt.Value == current
+			if th.Style == "endfield" {
+				// A choice is a numbered record row on hairlines; the current
+				// value is marked with the accent block on its left edge and
+				// bold ink. No radio discs, no check glyph, no rounded plate.
+				c.Line(r.X, r.Bottom(), r.Right(), r.Bottom(), 1, th.Outline)
+				if selected {
+					c.FillRect(ui.R(r.X, r.Y+8, 4, r.H-16), th.Mark)
+				}
+				c.Text(ui.R(r.X+16, r.Y+12, 32, 20), fmt.Sprintf("%02d", idx+1), 10, th.Muted, ui.AlignLeft, true)
+				c.Text(ui.R(r.X+52, r.Y+12, r.W-100, 22), opt.Label, 15, th.Text, ui.AlignLeft, selected)
+				c.TextBlock(ui.R(r.X+52, r.Y+36, r.W-110, 24), opt.Desc, 11, th.Muted, ui.AlignLeft, false)
+				if selected {
+					c.Text(ui.R(r.X+r.W-64, r.Y+12, 52, 20), "CURRENT", 9, th.Muted, ui.AlignRight, true)
+				}
+				return
+			}
+			c.FillRoundRect(r, th.CardRadius, th.Surface)
 			cc := th.Muted
 			if selected {
 				cc = th.Primary

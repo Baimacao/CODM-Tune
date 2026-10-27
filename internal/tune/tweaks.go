@@ -19,10 +19,10 @@ type TweakSet struct {
 
 // TweakDef describes a reversible system tweak.
 type TweakDef struct {
-	ID    string
-	Name  string
-	Desc  string
-	Sets  []TweakSet
+	ID     string
+	Name   string
+	Desc   string
+	Sets   []TweakSet
 	Reboot bool
 }
 
@@ -121,8 +121,8 @@ func (c *Control) tweakDefs() map[string]TweakDef {
 		},
 		"hags": {
 			ID: "hags", Name: "硬件加速 GPU 调度",
-			Desc: "HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers HwSchMode=2；需重启，部分驱动会掉帧，高级项。",
-			Sets: []TweakSet{{Key: `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers`, Name: "HwSchMode", Kind: "dword", On: 2}},
+			Desc:   "HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers HwSchMode=2；需重启，部分驱动会掉帧，高级项。",
+			Sets:   []TweakSet{{Key: `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers`, Name: "HwSchMode", Kind: "dword", On: 2}},
 			Reboot: true,
 		},
 		"fso": {
