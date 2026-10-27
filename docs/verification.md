@@ -781,19 +781,20 @@ verify mem-run   before=9192MB after=12292MB freed=3096MB runs=4 skipped=[]
 ## 72. 资源实测（最终构建）
 
 ```
-idle 120 s 采样（主进程 + 2 个子进程，终末地 STOCK，HUD OFFLINE）
-21168  0.08% of one core   2.5 MB   (--overlay)
-22032  1.41% of one core  10.9 MB   (主进程)
-24460  0.00% of one core   2.5 MB   (--crosshair)
-合计约 1.48% of one core / 62 MB
-逐秒峰值：主进程 4.7%，--overlay 3.1%，--crosshair 1.6%
+v12.1 实测（主进程 + 2 个子进程，终末地 STOCK，HUD OFFLINE，主窗口在后台）
+60 s   main 0.16%  10.7 MB   overlay 0.00%  17.1 MB   crosshair 0.31%  18.5 MB   TOTAL 0.47%  46.3 MB
+120 s  main 0.14%  10.0 MB   overlay 0.04%  17.1 MB   crosshair 0.10%  18.5 MB   TOTAL 0.29%  45.6 MB
+120 s  main 0.14%  13.6 MB   overlay 0.01%  17.0 MB   crosshair 0.12%  18.5 MB   TOTAL 0.27%  49.1 MB
+前台 120 s  main 0.86%  11.8 MB  overlay 0.09%   2.8 MB   crosshair 0.07%   2.7 MB   TOTAL 1.02%  17.3 MB
+前台 120 s  main 0.23%  11.6 MB  overlay 0.09%   5.7 MB   crosshair 0.07%   5.1 MB   TOTAL 0.39%  22.4 MB
 ```
 
-- 内存是稳定后的工作集：启动瞬间约 32 / 16 / 17 MB，`TrimWorkingSet`（每 3 分钟）与回收后回落到 11 / 2.5 / 2.5 MB。
-- 三进程合计 62 MB，在 128 MB 预算内；比 v11 单进程 12 MB 增加的是 HUD 与准心两个独立子进程。
-- "单核占比"与任务管理器的 8 核百分比换算：1.48% ÷ 8 = 0.19%，所以任务管理器里看到的是零点几。
-- 采样方法：按 PID 建哈希表取 `Process.CPU` 差值再除以实际间隔；用 `Get-CimInstance Win32_Process` 的 `CommandLine` 区分 `--overlay` / `--crosshair`。用 `Where-Object Id -eq` 在字符串插值里会静默取空，读数不可信。
-- 短时尖峰计入后仍会看到偶发 3.1%/4.7%（3 分钟 `TrimWorkingSet`、10 s 全进程快照、切页 0.78 s 全速重绘），持续负载以 120 s 均值为准。
+- 后台稳态 0.27–0.47%，前台（窗口被激活、正在显示）1.02% 与 0.39% 两次；都低于 v12 发布时的 1.48%。
+- 内存：启动瞬间约 32 / 16 / 17 MB；三分钟一次的 `TrimWorkingSet` 把主进程与两个子进程压到 11.8 / 2.8 / 2.7 MB（合计 17.3 MB）。
+- 三进程合计 17–49 MB，在 128 MB 预算内；比 v11 单进程 12 MB 增加的是 HUD 与准心两个独立子进程。
+- "单核占比"与任务管理器的 8 核百分比换算：0.29% ÷ 8 = 0.036%，任务管理器里看到的是 0.x 甚至 0。
+- 采样方法：按 PID 建哈希表取 `Process.CPU` 差值再除以实际间隔；用 `Get-CimInstance Win32_Process` 的 `CommandLine` 区分 `--overlay` / `--crosshair`。`Where-Object Id -eq` 在字符串插值里会静默取空，读数不可信；`$map[[int]$p.ProcessId]` 也要显式转 int，否则哈希键类型不匹配、标签全空。
+- 读数噪声：同一份代码连测会看到 0.08%–6.3% 的摆动。Windows 的 `Process.CPU` 来自采样时钟，短窗口内会被调度记账放大；以 ≥60 s 均值为准，并注意"窗口是否在前台"是主要变量。
 
 ### 72.1 本轮修掉的四个真实热点
 
