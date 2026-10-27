@@ -142,12 +142,7 @@ func (s *screens) tile(r ui.Rect, title, icon string, get func() (string, string
 				c.FillRect(ui.R(rr.X+16, rr.Y+63, 3, 16), th.Mark)
 			}
 			c.Text(ui.R(rr.X+58, rr.Y+14, rr.W-72, 22), title, 13, th.Text, ui.AlignLeft, true)
-			// 230 px of room at 12 px type fits about 18 CJK glyphs; cutting
-			// at 14 dropped the distinguishing half of strings like
-			// "限制中 · 2 个 ACE 进程独立".
-			if runes := []rune(status); len(runes) > 18 {
-				status = string(runes[:17]) + "…"
-			}
+			status = fitStatus(c, status, 12, rr.W-40)
 			c.Text(ui.R(rr.X+24, rr.Y+62, rr.W-40, 20), status, 12, th.Text, ui.AlignLeft, true)
 			c.TextBlock(ui.R(rr.X+16, rr.Y+90, rr.W-32, 40), detail, 11, th.Muted, ui.AlignLeft, false)
 			c.Text(ui.R(rr.X+16, rr.Bottom()-24, rr.W-32, 16), "打开 →", 10, th.Muted, ui.AlignRight, false)
@@ -156,15 +151,30 @@ func (s *screens) tile(r ui.Rect, title, icon string, get func() (string, string
 		c.FillRoundRect(ui.R(rr.X+16, rr.Y+14, 34, 34), 11, col.WithAlpha(26))
 		drawIcon(c, ui.R(rr.X+22, rr.Y+20, 22, 22), icon, col)
 		c.Text(ui.R(rr.X+58, rr.Y+14, rr.W-72, 22), title, 14, th.Text, ui.AlignLeft, true)
-		if runes := []rune(status); len(runes) > 18 {
-			status = string(runes[:17]) + "…"
-		}
+		status = fitStatus(c, status, 13, rr.W-32)
 		c.Text(ui.R(rr.X+16, rr.Y+62, rr.W-32, 20), status, 13, col, ui.AlignLeft, true)
 		c.TextBlock(ui.R(rr.X+16, rr.Y+88, rr.W-32, 40), detail, 11, th.Muted, ui.AlignLeft, false)
 		c.Text(ui.R(rr.X+16, rr.Bottom()-24, rr.W-32, 16), "Enter 打开 →", 10, th.PrimaryDim, ui.AlignRight, false)
 	}
 	n.Activate = func(*ui.Node) { open() }
 	return n
+}
+
+// fitStatus trims a status line to the card width. A fixed rune budget cannot
+// work here: "限制中 · 2 个 ACE 进程独立" and "已应用 · High · 排除 CPU 0" are
+// both around twenty glyphs but differ in width, and the font is user
+// selectable. Measuring is the only honest test.
+func fitStatus(c ui.Painter, s string, size, maxW float32) string {
+	if c.Measure(s, size, true).X <= maxW {
+		return s
+	}
+	runes := []rune(s)
+	for i := len(runes) - 1; i > 0; i-- {
+		if c.Measure(string(runes[:i])+"…", size, true).X <= maxW {
+			return string(runes[:i]) + "…"
+		}
+	}
+	return "…"
 }
 
 var _ = strings.TrimSpace

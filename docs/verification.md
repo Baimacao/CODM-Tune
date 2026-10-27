@@ -922,7 +922,11 @@ t=30s frames=229 drew=59 空转均=0.04ms 画均=20.88ms 峰值=..ms present=0.7
 
 网格层改到内容下方铺底之后，各页原本都会 `FillRect(全窗, 主题底色)`，把网格完全盖住（截图验证：网格彻底消失）。现在 `internal/ui/app.go` 的 `draw` 里算一个 `opaqueBase := a.BgImage != "" || gridBelow`，为真时页面不再铺底色。同时把扫描线 alpha 从 `0x08` 降到 `0x05`、网格线从 `0x10` 降到 `0x09`（它现在是窗口底色，不再是叠在页面上的覆盖），缓存文件名加 `-v2` 后缀避免读到旧图。
 
-### 78.5 实测占用（120 s，主窗口在前台，CODM 同时运行）
+### 78.5 概览卡片状态行的截断
+
+原来按固定 rune 数截断（14 个），`限制中 · 2 个 ACE 进程独立` 被切成 `限制中 · 2 个 ACE...`，`已应用 · High · 排除 CPU 0` 也被切。放宽到 18 之后两者仍不一致——它们字符数相近但宽度差得多，而字体是用户可选的。改成按实测宽度截断：`internal/appui/overview.go` 新增 `fitStatus(c ui.Painter, s string, size, maxW float32) string`，先用 `c.Measure(s, size, true).X` 判断是否放得下，放不下再从尾部逐字回退直到 `宽度 + "…"` 合身。
+
+### 78.6 实测占用（120 s，主窗口在前台，CODM 同时运行）
 
 ```
 main pid=80448 cpu=0.66% of one core / 0.083% of all cores  mem=15.6 MB
@@ -931,10 +935,10 @@ main pid=80448 cpu=1.38% of one core / 0.173% of all cores  mem=20.3 MB
 
 第二条是启动后第一次采样（含初始化与一次内存回收）。对比优化前 3.4–6.8%，达标（硬约束 CPU <1%、内存 <128 MB）。
 
-### 78.6 构建
+### 78.7 构建
 
 ```
-build.cmd       # 成功，bin\codmtune.exe 12,241,920 bytes
+build.cmd       # 成功，bin\codmtune.exe 12,243,456 bytes
 go vet ./...    # 0
 go test ./...   # 全 ok
 gofmt -l        # 空
