@@ -135,6 +135,12 @@ func hudPaint(o *hudWindow) {
 	}
 }
 
+// HUDReady reports whether the window exists yet. The HUD process reads its
+// state file before RunHUD has created the window, so callers must not treat
+// "no window" as "nothing changed" — that would swallow the first state and
+// leave the HUD hidden forever.
+func HUDReady() bool { return gHUD != nil }
+
 // HUDAlpha sets uniform opacity and keeps black corners transparent.
 func HUDAlpha(a uint8) {
 	if gHUD == nil {

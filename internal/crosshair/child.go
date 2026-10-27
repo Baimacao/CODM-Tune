@@ -25,7 +25,11 @@ type State struct {
 var (
 	mu    sync.RWMutex
 	state = State{Settings: Default()}
-	child *exec.Cmd
+	// appliedState mirrors what the window shows; the window does not exist
+	// when the first state arrives, so a plain prev-compare would swallow it.
+	appliedState State
+	applied      bool
+	child        *exec.Cmd
 )
 
 func statePath() string {
@@ -123,11 +127,22 @@ func load() {
 		fmt.Sprintf("%+v|%v", st.Settings, st.Show)
 	state = st
 	mu.Unlock()
-	win32.CrossAlpha(uint8(st.Settings.Alpha))
+	// The first read happens before RunCrosshair has created the window, so
+	// every property call below would be a no-op and the compare-with-previous
+	// gate would then suppress the correct values forever.
+	if !win32.CrossReady() {
+		return
+	}
+	first := !applied
+	applied = true
+	if first || st.Settings.Alpha != appliedState.Settings.Alpha {
+		win32.CrossAlpha(uint8(st.Settings.Alpha))
+	}
 	win32.CrossShow(st.Show)
-	if changed {
+	if first || changed {
 		win32.CrossMarkDirty()
 	}
+	appliedState = st
 }
 
 func draw(c *win32.Canvas) {

@@ -56,8 +56,13 @@ var (
 	pathOnce sync.Once
 	stateMu  sync.RWMutex
 	current  State
-	childMu  sync.Mutex
-	child    *exec.Cmd
+	// applied is what the window currently reflects. It is separate from
+	// current because the window does not exist yet when the first state
+	// arrives; load() runs once before RunHUD and again every 250 ms after.
+	appliedState State
+	applied      bool
+	childMu      sync.Mutex
+	child        *exec.Cmd
 )
 
 func statePath() string {
@@ -184,17 +189,25 @@ func load() {
 		}
 	}
 	stateMu.Lock()
-	prev := current
 	current = st
 	stateMu.Unlock()
+	// The window is created on the main thread after this function has already
+	// run once, so a state that arrived before the window existed must be
+	// re-applied instead of being swallowed by the compare-with-previous gate
+	// below. Without this the HUD process stays alive but never gets shown.
+	if !win32.HUDReady() {
+		return
+	}
+	prev, first := appliedState, !applied
+	appliedState, applied = st, true
 	// Only touch the window when a window-level property actually changed.
 	// SetLayeredWindowAttributes and SetWindowPos each force DWM to recompose
 	// the layered window; calling them four times a second for identical values
 	// showed up as 5% of one core in the overlay process.
-	if st.Opacity != prev.Opacity {
+	if first || st.Opacity != prev.Opacity {
 		win32.HUDAlpha(uint8(clamp(st.Opacity, 178, 255)))
 	}
-	if st.Corner != prev.Corner || (st.Corner == "custom" &&
+	if first || st.Corner != prev.Corner || (st.Corner == "custom" &&
 		(st.HudX != prev.HudX || st.HudY != prev.HudY || st.HudScale != prev.HudScale)) {
 		if st.Corner == "custom" {
 			win32.HUDPositionCustom(st.HudX, st.HudY)
@@ -202,7 +215,7 @@ func load() {
 			win32.HUDPosition(st.Corner)
 		}
 	}
-	if st.Show != prev.Show {
+	if first || st.Show != prev.Show {
 		win32.HUDShow(st.Show)
 	}
 }

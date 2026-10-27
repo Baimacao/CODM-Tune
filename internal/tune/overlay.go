@@ -52,10 +52,36 @@ type presentMon struct {
 	frames  []frameRow
 	ready   bool
 	started time.Time
-	blocked bool
+	// blocked means PresentMon was killed because no Present event arrived.
+	// It is a pause, not a verdict: the usual cause is the game sitting in a
+	// menu or minimized (nothing presents), so retry instead of leaving the
+	// panel on N/A for the rest of the session.
+	blocked   bool
+	blockedAt time.Time
+	// headerLine caches the CSV header so a mid-file read can still resolve
+	// columns. Re-reading the whole file every second made the cost grow with
+	// session length: at 180 fps the CSV passes 3 MB in half a minute and
+	// encoding/csv on that much text cost about 9% of one core, far more than
+	// the panel it feeds.
+	headerLine string
+	// utf16/encKnown remember the CSV encoding probed from the file head, so a
+	// tail read that starts past the BOM still decodes correctly.
+	utf16    bool
+	encKnown bool
 }
 
 var pm *presentMon
+
+// pmCoolDown is how long a collector that saw no Present events waits before
+// it is allowed to start again. Twelve seconds of silence almost always means
+// the game is still loading or sitting minimized, not that ETW is broken, so
+// giving up for the rest of the session left the panel stuck on "--".
+const pmCoolDown = 60 * time.Second
+
+// paused reports whether a blocked collector is still inside its cool-down.
+func (p *presentMon) paused(now time.Time) bool {
+	return p.blocked && now.Sub(p.blockedAt) < pmCoolDown
+}
 
 // OverlayData returns the current HUD values.
 func (c *Control) OverlayData() OverlayStats {
@@ -119,8 +145,15 @@ func (c *Control) collectOverlay(cfg Config, pid uint32, name string) OverlaySta
 	if pm == nil {
 		pm = &presentMon{}
 	}
-	if pm.blocked {
+	// A blocked collector is retried after a cool-down rather than abandoned:
+	// "no Present event yet" normally means the game is still loading or
+	// minimized, and both resolve on their own.
+	if pm.paused(time.Now()) {
 		return stats
+	}
+	if pm.blocked {
+		pm.blocked = false
+		pm.cmd = nil
 	}
 	dir := filepath.Join(configDir(), "overlay")
 	_ = os.MkdirAll(dir, 0o755)
@@ -190,14 +223,11 @@ func (c *Control) collectOverlay(cfg Config, pid uint32, name string) OverlaySta
 			pm.cmd = nil
 		}
 		pm.blocked = true
-		c.logf("PresentMon：本机 ETW 12 秒内没有 Present 事件，已停止采集（FPS 显示 --）")
+		pm.blockedAt = time.Now()
+		c.logf("PresentMon：本机 ETW 12 秒内没有 Present 事件，暂停采集，60 秒后重试（FPS 显示 --）")
 		return stats
 	}
-	b, err := os.ReadFile(pm.csv)
-	if err != nil {
-		return stats
-	}
-	frames := parseOutput(b)
+	frames := pm.readTail()
 	ready := len(frames) >= 8
 	pm.frames = frames
 	pm.ready = ready
@@ -209,6 +239,7 @@ func (c *Control) collectOverlay(cfg Config, pid uint32, name string) OverlaySta
 	return stats
 }
 
+// frameCount reports how many rows the last successful poll parsed.
 func (p *presentMon) frameCount() int {
 	if p == nil {
 		return 0
@@ -224,49 +255,113 @@ func (p *presentMon) readLocked() ([]frameRow, bool) {
 	return p.frames, p.ready
 }
 
-// consume parses PresentMon's stdout. The CSV is streamed instead of written
-// to a live file because PresentMon keeps the output file locked exclusively.
-func (p *presentMon) poll() {
-	dbg := func(s string) {
-		// PresentMon debug logging was useful during bring-up but it writes a
-		// growing file on every 300 ms poll. Keep the hook for tests, not disk.
-		_ = s
+// csvTail bounds how much of PresentMon's CSV is parsed per poll. Only the
+// newest couple of seconds feed the panel, so reading the whole file bought
+// nothing and cost more every minute the game stayed open.
+const csvTail = 256 << 10
+
+// readTail parses the newest window of the CSV. The header row is remembered
+// from the first full read so later reads can start mid-file.
+func (p *presentMon) readTail() []frameRow {
+	f, err := os.Open(p.csv)
+	if err != nil {
+		return p.frames
 	}
-	dbg("poll start " + p.csv)
-	t := time.NewTicker(500 * time.Millisecond)
-	for range t.C {
-		b, err := os.ReadFile(p.csv)
-		if err != nil {
-			dbg("read err " + err.Error())
-			continue
-		}
-		if len(b) == 0 {
-			continue
-		}
-		rows := parseOutput(b)
-		dbg(fmt.Sprintf("poll bytes=%d rows=%d", len(b), len(rows)))
-		p.mu.Lock()
-		p.frames = rows
-		p.ready = len(rows) >= 8
-		p.mu.Unlock()
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return p.frames
 	}
+	size := st.Size()
+	start := int64(0)
+	if size > csvTail {
+		start = size - csvTail
+		if start%2 != 0 { // UTF-16LE code units are two bytes
+			start++
+		}
+	}
+	// A tail read starts past the BOM, so the encoding is probed from the head
+	// once and remembered. Only a probe that actually read two bytes counts:
+	// the first poll usually runs before PresentMon has written anything, and
+	// caching "not UTF-16" from an empty file would mis-decode every later
+	// poll, turning the header into NUL-separated noise and yielding 0 rows.
+	if !p.encKnown {
+		var bom [2]byte
+		if n, err := f.ReadAt(bom[:], 0); n == 2 && err == nil {
+			p.utf16 = bom[0] == 0xFF && bom[1] == 0xFE
+			p.encKnown = true
+		}
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return p.frames
+	}
+	buf := make([]byte, size-start)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return p.frames
+	}
+	raw := buf[:n]
+	if p.utf16 && start == 0 && len(raw) >= 2 && raw[0] == 0xFF && raw[1] == 0xFE {
+		raw = raw[2:]
+	}
+	text := decodeUTF16(raw, p.utf16)
+	if start > 0 {
+		// Skip the partial first line, then re-attach the header so the column
+		// order is known without touching the beginning of the file every poll.
+		i := bytes.IndexByte(text, '\n')
+		if i < 0 {
+			return p.frames
+		}
+		if p.headerLine == "" {
+			if h := p.readHeader(f); h != "" {
+				p.headerLine = h
+			}
+		}
+		if p.headerLine == "" {
+			return p.frames
+		}
+		text = append([]byte(p.headerLine+"\n"), text[i+1:]...)
+	}
+	rows, header := parseCSV(text)
+	if header != "" {
+		p.headerLine = header
+	}
+	return rows
 }
 
-func parseOutput(raw []byte) []frameRow {
-	// PresentMon writes UTF-16LE with a BOM when stdout is redirected to a
-	// file. Decode it before handing the CSV to encoding/csv.
-	if len(raw) >= 2 && raw[0] == 0xFF && raw[1] == 0xFE {
-		u := make([]uint16, 0, (len(raw)-2)/2)
-		for i := 2; i+1 < len(raw); i += 2 {
-			u = append(u, uint16(raw[i])|uint16(raw[i+1])<<8)
-		}
-		raw = []byte(string(utf16.Decode(u)))
+// readHeader pulls just the first line of the CSV. It is only needed when the
+// tail window starts past the header, which happens once per file.
+func (p *presentMon) readHeader(f *os.File) string {
+	buf := make([]byte, 4096)
+	n, _ := f.ReadAt(buf, 0)
+	if n <= 0 {
+		return ""
 	}
+	text := decodeUTF16(buf[:n], p.utf16)
+	if i := bytes.IndexByte(text, '\n'); i >= 0 {
+		text = text[:i]
+	}
+	return strings.TrimSpace(strings.TrimPrefix(string(text), "\ufeff"))
+}
+
+func decodeUTF16(raw []byte, wide bool) []byte {
+	if !wide {
+		return raw
+	}
+	u := make([]uint16, 0, len(raw)/2)
+	for i := 0; i+1 < len(raw); i += 2 {
+		u = append(u, uint16(raw[i])|uint16(raw[i+1])<<8)
+	}
+	return []byte(string(utf16.Decode(u)))
+}
+
+// parseCSV reads one CSV block and also returns its header line verbatim.
+func parseCSV(raw []byte) (rows []frameRow, headerLine string) {
 	cr := csv.NewReader(bytes.NewReader(raw))
 	cr.FieldsPerRecord = -1
 	header, err := cr.Read()
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	idx := map[string]int{}
 	for i, h := range header {
@@ -284,15 +379,14 @@ func parseOutput(raw []byte) []frameRow {
 		mi, okM = idx["msbetweendisplaychange"]
 	}
 	if !okT || !okM {
-		return nil
+		return nil, strings.Join(header, ",")
 	}
-	var rows []frameRow
 	for {
 		rec, err := cr.Read()
-		if err == io.EOF {
+		if err != nil {
 			break
 		}
-		if err != nil || len(rec) <= ti || len(rec) <= mi {
+		if len(rec) <= ti || len(rec) <= mi {
 			continue
 		}
 		t, e1 := strconv.ParseFloat(rec[ti], 64)
@@ -305,7 +399,7 @@ func parseOutput(raw []byte) []frameRow {
 	if len(rows) > 1200 {
 		rows = rows[len(rows)-1200:]
 	}
-	return rows
+	return rows, strings.Join(header, ",")
 }
 
 func frameStats(rows []frameRow) (fps, low, stutter float64) {
@@ -386,6 +480,10 @@ func stopPresentMon() {
 		_ = pm.cmd.Process.Kill()
 		pm.cmd = nil
 	}
+	// Clearing the pause lets the next game launch retry immediately instead
+	// of inheriting the previous session's cool-down.
+	pm.blocked = false
+	pm.blockedAt = time.Time{}
 }
 
 func (c *Control) sampleNetwork(cfg Config, pid uint32, rtts *[]uint32) (uint32, string, string) {

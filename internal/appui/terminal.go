@@ -118,7 +118,7 @@ func (s *screens) drawTerminal(c ui.Painter) {
 
 	now := time.Now()
 	c.Text(ui.R(termW-360, 42, 312, 26), now.Format("2006-01-02  15:04:05"), 16, amber, ui.AlignRight, false)
-	c.Text(ui.R(termW-360, 70, 312, 18), "BUILD v12.0 · LANDSCAPE", 10, dim, ui.AlignRight, false)
+	c.Text(ui.R(termW-360, 70, 312, 18), "BUILD v12.2 · LANDSCAPE", 10, dim, ui.AlignRight, false)
 
 	game, _, _, running, _ := s.c.Game()
 	state := "STANDBY"

@@ -24,9 +24,12 @@ func draw(c *win32.Canvas) {
 		scale = 1
 	}
 	c.SetScale(scale)
-	if st.Theme == "oled" {
+	switch st.Theme {
+	case "oled":
 		ui.SetTheme(&ui.OLED)
-	} else {
+	case "light":
+		ui.SetTheme(&ui.Light)
+	default:
 		ui.SetTheme(&ui.Dark)
 	}
 	th := ui.CurrentTheme
@@ -54,11 +57,11 @@ func draw(c *win32.Canvas) {
 		fpsCol := th.Muted
 		if st.Ready {
 			fps = fmt.Sprintf("%.0f", st.FPS)
-			size = 42
+			size = 40
 			fpsCol = th.Text
 		}
-		hudText(c, st, ui.R(16, 38, 150, 48), fps, size, fpsCol, ui.AlignLeft, true)
-		hudText(c, st, ui.R(16, 84, 150, 14), "FPS", 8, th.Text, ui.AlignLeft, false)
+		hudText(c, st, ui.R(16, 34, 150, 44), fps, size, fpsCol, ui.AlignLeft, true)
+		hudText(c, st, ui.R(16, 78, 150, 12), "FPS", 8, th.Text, ui.AlignLeft, false)
 
 		low, stag := "—", "—"
 		if st.Ready {
@@ -67,13 +70,13 @@ func draw(c *win32.Canvas) {
 		}
 		x := float32(150)
 		if st.ShowLow {
-			hudText(c, st, ui.R(x, 40, 70, 16), "1% LOW", 8, th.Text, ui.AlignLeft, false)
-			hudText(c, st, ui.R(x, 56, 70, 22), low, 15, th.Text, ui.AlignLeft, true)
+			hudText(c, st, ui.R(x, 36, 70, 14), "1% LOW", 8, th.Text, ui.AlignLeft, false)
+			hudText(c, st, ui.R(x, 52, 70, 22), low, 15, th.Text, ui.AlignLeft, true)
 			x += 76
 		}
 		if st.ShowStut {
-			hudText(c, st, ui.R(x, 40, 90, 16), "STUTTER", 8, th.Text, ui.AlignLeft, false)
-			hudText(c, st, ui.R(x, 56, 90, 22), stag, 15, th.Text, ui.AlignLeft, true)
+			hudText(c, st, ui.R(x, 36, 90, 14), "STUTTER", 8, th.Text, ui.AlignLeft, false)
+			hudText(c, st, ui.R(x, 52, 90, 22), stag, 15, th.Text, ui.AlignLeft, true)
 		}
 	}
 
@@ -82,14 +85,14 @@ func draw(c *win32.Canvas) {
 		if st.RTT > 0 {
 			rtt = fmt.Sprintf("%d ms", st.RTT)
 		}
-		hudText(c, st, ui.R(16, 92, 130, 16), "网络延迟", 8, th.Text, ui.AlignLeft, false)
+		hudText(c, st, ui.R(16, 94, 130, 14), "网络延迟", 8, th.Text, ui.AlignLeft, false)
 		hudText(c, st, ui.R(16, 108, 130, 24), rtt, 17, th.Text, ui.AlignLeft, true)
 		if st.Jitter > 0 {
-			hudText(c, st, ui.R(150, 98, 160, 16), fmt.Sprintf("jitter %d ms", st.Jitter), 8, th.Muted, ui.AlignLeft, false)
+			hudText(c, st, ui.R(150, 100, 160, 14), fmt.Sprintf("jitter %d ms", st.Jitter), 8, th.Muted, ui.AlignLeft, false)
 		}
 	}
 
-	rowY := float32(132)
+	rowY := float32(136)
 	if st.ShowLoss {
 		los := "—"
 		if st.LossKnown {

@@ -818,3 +818,61 @@ go test ./...   # 全 ok
 - 内存回收的待机列表与注册表缓存两项在精简系统上可能返回 `STATUS_PRIVILEGE_NOT_HELD`，界面显示跳过项，工作集与文件缓存不受影响。
 - 终末地纸白在 150% DPI 下的 1 px 发丝线锐度待实机确认（当前按逻辑像素绘制）。
 - 游戏内 HUD（终末地主题下）与 FOV、ACE 共存仍需用户实机回归。
+
+## 75. v12.2：悬浮窗的三处修复
+
+三处都是「面板看起来坏了」但根因各不相同的真实 bug，全部有回归测试或屏幕证据。
+
+### 75.1 12 秒没帧 → 整个会话永久 N/A
+
+`internal/tune/overlay.go` 里 `collectOverlay` 原本在 PresentMon 启动 12 秒仍无帧时 `kill` 子进程并置 `pm.blocked = true`，而 `pm.blocked` 的判断在函数入口直接 `return stats` —— **没有超时，也没有任何路径能把它改回 false**（除了游戏退出分支和 `stopPresentMon`）。
+
+问题在于「12 秒没有 Present 事件」最常见的成因不是 ETW 坏了，而是游戏正在加载、在读图、或者被最小化 —— 这三种情况都会自己恢复。实测日志里出现过连续多次 `PresentMon：开始采集` → 12 秒后停采的循环，正是游戏在菜单里不出帧。
+
+改法：`blocked` 从「判决」降级为「暂停」，加 `blockedAt`，新增
+
+```go
+const pmCoolDown = 60 * time.Second
+func (p *presentMon) paused(now time.Time) bool {
+	return p.blocked && now.Sub(p.blockedAt) < pmCoolDown
+}
+```
+
+`collectOverlay` 入口改成 `if pm.paused(time.Now()) { return stats }`，冷却结束后清 `blocked` 与 `cmd` 让它重新 spawn。`stopPresentMon` 额外清 `blocked`/`blockedAt`，否则下一次启动游戏会继承上一局的冷却。
+
+回归测试 `internal/tune/overlay_test.go`：`TestBlockedCollectorRetriesAfterCoolDown`（冷却未满=暂停、正好到期=解除、超时后仍解除）、`TestStopPresentMonClearsPause`。
+
+### 75.2 悬浮窗不跟随浅色主题
+
+`internal/hud/draw.go` 的 `draw()` 只判断 `st.Theme == "oled"`，其余全部落到 `ui.Dark` —— 界面切到浅色后 HUD 仍是深色板。改为三分支，`light` 走 `ui.Light`。
+
+证据：`overlay-state.json` 里 `theme:"light"`，修复前截图是深色板白字，修复后截图是纸白板墨字（`bin/hud-live.png`，见 README）。
+
+### 75.3 CSV 每秒整份重读
+
+PresentMon 写的是 append-only CSV，180 fps 下每分钟涨约 3 MB。原 `poll()` 用 `os.ReadFile` 读全文件再 `encoding/csv` 解析，成本随会话时长线性增长，实测约 9% 单核。
+
+改成尾部窗口读取：`const csvTail = 256 << 10`，`readTail()` 用 `Open` + `Stat` + `Seek` 只读最后 256 KB，起点按 UTF-16LE 两字节对齐，被截断的首行丢弃后用缓存的 `p.headerLine` 补回表头。基准（6.5 MB / 16 万行）：`whole-file 89,566,000 ns/op` vs `tail-window 7,086,367 ns/op`，约 12.6×。
+
+配套的编码探测 bug：`ReadAt(bom[:], 0)` 首轮读到 0 字节时无条件 `encKnown = true`，把「不是 UTF-16」永久缓存，之后所有尾部读取都按单字节解析 → 永久 0 行 → FPS 永远 `--`。改为只在真读到 2 字节时才 `encKnown = true`。回归测试 `TestReadTailKeepsEncodingWhenFirstPollIsEmpty` 专门钉这个。
+
+## 76. v12.2 构建与实测
+
+```
+build.cmd       # 成功，bin\codmtune.exe 12,111,872 bytes
+go vet ./...    # 0
+go test ./...   # 全 ok（tune 包新增 5 个测试）
+gofmt -l        # 空
+```
+
+游戏内实测（CODM pid 24332 正在运行，1080p，浅色主题，HUD 右上角）：
+
+- `overlay-state.json`：`ready=true fps=179.7 low=110.1 stutter=0 rtt=24 jitter=1 loss=0 theme=light`。
+- 屏幕截图：`180` 大字、`1% LOW 110`、`STUTTER 0.0%`、网络延迟 `24 ms`、`jitter 1 ms`、吞子弹风险 `0%`、服务器 `上海市`、按键行、页脚说明，纸白板墨字，圆角外透明。
+- 进程：主进程 + `--overlay` 子进程两个，无残留 PresentMon。
+
+## 77. 未执行 / 边界（v12.2）
+
+- 60 秒冷却期间仍显示 `--`，这是刻意的：宁可空着也不显示估算值。
+- HUD 拖拽/缩放编辑仍未实现，位置靠设置页的四角 + 偏移。
+- 逐像素「面板半透明、文字不透明」未实现，当前是整窗 alpha。

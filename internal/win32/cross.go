@@ -114,6 +114,11 @@ func crossPaint(o *crossWindow) {
 	}
 }
 
+// CrossReady reports whether the window exists yet. The helper reads its state
+// file before RunCrosshair has created the window, so property calls made from
+// that first read are silently dropped; callers must re-apply once it exists.
+func CrossReady() bool { return gCross != nil }
+
 // CrossMarkDirty asks for one repaint on the next tick. Called by the state
 // loader when the settings actually changed; identical state costs nothing.
 func CrossMarkDirty() {
