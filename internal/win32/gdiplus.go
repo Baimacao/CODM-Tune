@@ -35,6 +35,7 @@ type shimProcs struct {
 	fontFamily   *syscall.LazyProc
 	imageSize    *syscall.LazyProc
 	drawImage    *syscall.LazyProc
+	drawSolid    *syscall.LazyProc
 	glyph        *syscall.LazyProc
 	scale        *syscall.LazyProc
 	view         *syscall.LazyProc
@@ -68,6 +69,7 @@ func LoadUI() error {
 		measure:      dll.NewProc("gt_measure"),
 		pushClip:     dll.NewProc("gt_push_clip"),
 		popClip:      dll.NewProc("gt_pop_clip"),
+		drawSolid:    dll.NewProc("gt_draw_image_solid"),
 		fontFamily:   dll.NewProc("gt_set_font_family"),
 		imageSize:    dll.NewProc("gt_image_size"),
 		drawImage:    dll.NewProc("gt_draw_image"),
@@ -332,6 +334,21 @@ func ImageSize(path string) (int, int) {
 }
 
 // DrawImage paints a still image into the canvas with global opacity.
+// DrawImageSolid blits an opaque image without alpha blending. Use it only for
+// images that are fully opaque (a layer flattened onto the theme background).
+func (c *Canvas) DrawImageSolid(path string, r ui.Rect, alpha uint8) bool {
+	if c.G == 0 || path == "" || r.Empty() {
+		return false
+	}
+	p, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return false
+	}
+	ok, _, _ := shim.drawSolid.Call(c.G, uintptr(unsafe.Pointer(p)),
+		uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)), uintptr(i32(r.H)))
+	return ok != 0
+}
+
 func (c *Canvas) DrawImage(path string, r ui.Rect, alpha uint8) bool {
 	if c.G == 0 || !fileExists(path) || r.Empty() {
 		return false

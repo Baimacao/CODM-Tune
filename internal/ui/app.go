@@ -576,6 +576,20 @@ func (a *App) Frame(c Painter, dt float32) bool {
 func (a *App) draw(c Painter) {
 	full := Rect{0, 0, float32(a.W), float32(a.H)}
 	c.FillRect(full, a.Th.Bg)
+	// Without a wallpaper the industrial grid is a flattened, fully opaque layer
+	// (scanlines pre-blended onto the theme background). Painting it first with
+	// SourceCopy costs a plain copy; painting it on top of the screen content as
+	// an alpha layer cost ~17 ms per frame in software compositing. With a
+	// wallpaper it must stay on top so the image remains visible.
+	gridBelow := false
+	if a.Th.Industrial() && a.BgImage == "" {
+		if iw, ih := c.ImageSize(a.GridImage); a.GridImage != "" && iw > 0 && ih > 0 {
+			gridBelow = c.DrawImageSolid(a.GridImage, full, 255)
+		} else {
+			a.drawArkGrid(c)
+			gridBelow = true
+		}
+	}
 	if a.BgImage != "" {
 		if iw, ih := c.ImageSize(a.BgImage); iw > 0 && ih > 0 {
 			s := maxf(float32(a.W)/float32(iw), float32(a.H)/float32(ih))
@@ -586,6 +600,7 @@ func (a *App) draw(c Painter) {
 			}
 		}
 	}
+	opaqueBase := a.BgImage != "" || gridBelow
 	top := a.Screens.Top()
 	wipeP := float32(0)
 	if a.wipeOn && a.wipeDur > 0 {
@@ -611,27 +626,26 @@ func (a *App) draw(c Painter) {
 		// Without a wallpaper each screen is opaque: its background slides with
 		// it so an incoming screen covers the old one instead of letting it
 		// show through gaps. With a wallpaper the image stays visible.
+		// With the grid underneath (or a wallpaper) the window already has an
+		// opaque base, so a screen must not paint its own: doing so would hide
+		// the grid. Sliding pages then overlap like they do over a wallpaper.
 		if a.quiet && a.wipeOn && h == top {
 			c.PushClip(Rect{0, 0, wipeX, float32(a.H)})
-			if a.BgImage == "" {
+			if !opaqueBase {
 				c.FillRect(Rect{h.OX.Get(), 0, float32(a.W), float32(a.H)}, a.Th.Bg)
 			}
 			paint(h.Content, c, h.OX.Get(), 0)
 			c.PopClip()
 			continue
 		}
-		if a.BgImage == "" {
+		if !opaqueBase {
 			c.FillRect(Rect{h.OX.Get(), 0, float32(a.W), float32(a.H)}, a.Th.Bg)
 		}
 		paint(h.Content, c, h.OX.Get(), 0)
 	}
-	if a.Th.Industrial() {
-		if a.GridImage != "" {
-			if iw, ih := c.ImageSize(a.GridImage); iw > 0 && ih > 0 {
-				c.DrawImage(a.GridImage, Rect{0, 0, float32(a.W), float32(a.H)}, 255)
-			} else {
-				a.drawArkGrid(c)
-			}
+	if a.Th.Industrial() && !gridBelow {
+		if iw, ih := c.ImageSize(a.GridImage); a.GridImage != "" && iw > 0 && ih > 0 {
+			c.DrawImage(a.GridImage, Rect{0, 0, float32(a.W), float32(a.H)}, 255)
 		} else {
 			a.drawArkGrid(c)
 		}

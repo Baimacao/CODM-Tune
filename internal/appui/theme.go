@@ -241,7 +241,7 @@ func (s *screens) applyTheme() {
 	ui.SetTheme(&base)
 	s.app.UseTheme(ui.CurrentTheme)
 	s.app.BgImage = cfg.Background
-	s.app.GridImage = ensureArkGrid(&base)
+	s.app.GridImage = ensureArkGrid(&base, cfg.Background != "")
 	s.app.BgDim = 214
 	if cfg.Font != "" {
 		if err := win32.SetFontFamily(cfg.Font); err != nil {

@@ -102,6 +102,8 @@ type Painter interface {
 	Glyph(s string, r Rect, size float32, c Color)
 	ImageSize(path string) (int, int)
 	DrawImage(path string, r Rect, alpha uint8) bool
+	// DrawImageSolid is DrawImage for fully opaque sources: no blending.
+	DrawImageSolid(path string, r Rect, alpha uint8) bool
 	PushClip(r Rect)
 	PopClip()
 }

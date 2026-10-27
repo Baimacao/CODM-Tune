@@ -46,6 +46,8 @@ struct Canvas {
     Graphics* g;
     GraphicsState clips[32];
     int clipN;
+    float scale;
+    int offX, offY;
 };
 
 struct ImageRec {
@@ -54,6 +56,14 @@ struct ImageRec {
 };
 static std::vector<ImageRec> g_images;
 
+// GDI bitmaps for gt_blit_solid. GDI+ DrawImage into an HDC-backed Graphics
+// goes through its own scanline converter, which costs ~8 ms for a full
+// 1100x700 layer. A cached HBITMAP plus BitBlt is a straight DIB copy.
+struct BlitRec {
+    std::wstring path;
+    HBITMAP bmp;
+    int w, h;
+};
 static Image* get_image(const WCHAR* path) {
     if (!path) return nullptr;
     for (size_t i = 0; i < g_images.size(); i++)
@@ -73,6 +83,31 @@ static Image* get_image(const WCHAR* path) {
     g_images.push_back(rec);
     return img;
 }
+
+static std::vector<BlitRec> g_blits;
+
+static BlitRec* get_blit(const WCHAR* path) {
+    if (!path) return nullptr;
+    for (size_t i = 0; i < g_blits.size(); i++)
+        if (g_blits[i].path == path) return &g_blits[i];
+    Image* img = get_image(path);
+    if (!img) return nullptr;
+    HBITMAP hb = nullptr;
+    Bitmap* bm = (Bitmap*)img;
+    if (bm->GetHBITMAP(Color(255, 255, 255), &hb) != Ok || !hb) return nullptr;
+    BlitRec r;
+    r.path = path;
+    r.bmp = hb;
+    r.w = (int)img->GetWidth();
+    r.h = (int)img->GetHeight();
+    if (g_blits.size() >= 4) {
+        DeleteObject(g_blits[0].bmp);
+        g_blits.erase(g_blits.begin());
+    }
+    g_blits.push_back(r);
+    return &g_blits[g_blits.size() - 1];
+}
+
 
 static SolidBrush* get_brush(ARGB c) {
     for (int i = 0; i < g_brushN; i++)
@@ -186,6 +221,9 @@ __declspec(dllexport) void* gt_canvas_new(void* hdc) {
     if (!g_started) return nullptr;
     Canvas* c = new Canvas();
     c->clipN = 0;
+    c->scale = 1.0f;
+    c->offX = 0;
+    c->offY = 0;
     c->g = new Graphics((HDC)hdc);
     if (c->g->GetLastStatus() != Ok) {
         delete c->g;
@@ -198,8 +236,12 @@ __declspec(dllexport) void* gt_canvas_new(void* hdc) {
     // into the paper background at 12–13 px UI sizes. GDI+ falls back to
     // grayscale AA automatically when the target surface cannot do ClearType.
     c->g->SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
-    c->g->SetCompositingQuality(CompositingQualityHighQuality);
-    c->g->SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    // CompositingQualityHighQuality does gamma-correct blending in software,
+    // which made a full-window 1100x700 alpha overlay cost ~31 ms per frame.
+    // Default is a straight source-over blend: visually identical for these
+    // flat layers, an order of magnitude cheaper.
+    c->g->SetCompositingQuality(CompositingQualityDefault);
+    c->g->SetInterpolationMode(InterpolationModeBilinear);
     return c;
 }
 
@@ -319,6 +361,9 @@ __declspec(dllexport) void gt_set_view(void* p, int milli, int ox, int oy) {
     Canvas* c = (Canvas*)p;
     if (!c || milli <= 0) return;
     REAL s = milli / 1000.0f;
+    c->scale = (float)s;
+    c->offX = ox;
+    c->offY = oy;
     c->g->ResetTransform();
     c->g->ScaleTransform(s, s);
     c->g->TranslateTransform((REAL)ox, (REAL)oy);
@@ -328,6 +373,9 @@ __declspec(dllexport) void gt_set_scale(void* p, int milli) {
     Canvas* c = (Canvas*)p;
     if (!c || milli <= 0) return;
     REAL s = milli / 1000.0f;
+    c->scale = (float)s;
+    c->offX = 0;
+    c->offY = 0;
     c->g->ResetTransform();
     c->g->ScaleTransform(s, s);
 }
@@ -379,8 +427,16 @@ __declspec(dllexport) void gt_draw_image(void* p, const WCHAR* path, int x, int 
     if (!c || w <= 0 || h <= 0) return;
     Image* img = get_image(path);
     if (!img) return;
+    // 1:1 destination: skip the resampling path entirely. The grid/wallpaper
+    // layers are always drawn at their native size, and the scaled path was
+    // costing ~30 ms per frame on its own.
+    bool unscaled = (w == (int)img->GetWidth() && h == (int)img->GetHeight());
     if (alpha >= 255) {
-        c->g->DrawImage(img, Rect(x, y, w, h), 0, 0, (INT)img->GetWidth(), (INT)img->GetHeight(), UnitPixel);
+        if (unscaled) {
+            c->g->DrawImage(img, x, y);
+        } else {
+            c->g->DrawImage(img, Rect(x, y, w, h), 0, 0, (INT)img->GetWidth(), (INT)img->GetHeight(), UnitPixel);
+        }
         return;
     }
     ImageAttributes attr;
@@ -393,6 +449,40 @@ __declspec(dllexport) void gt_draw_image(void* p, const WCHAR* path, int x, int 
     };
     attr.SetColorMatrix(&cm, ColorMatrixFlagsDefault, ColorAdjustTypeBitmap);
     c->g->DrawImage(img, Rect(x, y, w, h), 0, 0, (INT)img->GetWidth(), (INT)img->GetHeight(), UnitPixel, &attr);
+}
+
+// gt_draw_image_solid blits an opaque image with CompositingModeSourceCopy.
+// Blending a full-window layer costs ~17 ms per frame in GDI+ software
+// compositing; copying it costs almost nothing. Only valid for images that have
+// no transparency of their own (the flattened grid/background layer).
+__declspec(dllexport) int gt_draw_image_solid(void* p, const WCHAR* path, int x, int y, int w, int h) {
+    Canvas* c = (Canvas*)p;
+    if (!c || w <= 0 || h <= 0) return 0;
+    BlitRec* b = get_blit(path);
+    if (!b) return 0;
+    // Coordinates arrive in logical units; GetHDC gives the untransformed
+    // device surface, so scale them the same way the transform would.
+    float s = c->scale > 0 ? c->scale : 1.0f;
+    HDC dst = c->g->GetHDC();
+    if (!dst) return 0;
+    int ok = 0;
+    HDC src = CreateCompatibleDC(dst);
+    if (src) {
+        HGDIOBJ old = SelectObject(src, b->bmp);
+        int dx = (int)(x * s + 0.5f) + c->offX, dy = (int)(y * s + 0.5f) + c->offY;
+        int dw = (int)(w * s + 0.5f), dh = (int)(h * s + 0.5f);
+        if (dw == b->w && dh == b->h) {
+            BitBlt(dst, dx, dy, dw, dh, src, 0, 0, SRCCOPY);
+        } else {
+            SetStretchBltMode(dst, COLORONCOLOR);
+            StretchBlt(dst, dx, dy, dw, dh, src, 0, 0, b->w, b->h, SRCCOPY);
+        }
+        SelectObject(src, old);
+        DeleteDC(src);
+        ok = 1;
+    }
+    c->g->ReleaseHDC(dst);
+    return ok;
 }
 
 } // extern "C"

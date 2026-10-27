@@ -876,3 +876,74 @@ gofmt -l        # 空
 - 60 秒冷却期间仍显示 `--`，这是刻意的：宁可空着也不显示估算值。
 - HUD 拖拽/缩放编辑仍未实现，位置靠设置页的四角 + 偏移。
 - 逐像素「面板半透明、文字不透明」未实现，当前是整窗 alpha。
+
+## 78. v12.3：单帧绘制成本 58 ms → 14 ms
+
+### 78.1 归因方法
+
+先用环境变量开关的 pprof 拿第一层归因（`CODMTUNE_CPUPROFILE`，默认零开销，保留在 `cmd/codmtune/main.go`）：
+
+```
+CODMTUNE_CPUPROFILE=E:\tmp\cpu.pprof CODMTUNE_CPUPROFILE_SEC=40 bin\codmtune.exe
+go tool pprof -top -cum bin\codmtune.exe E:\tmp\cpu.pprof
+```
+
+`-top` 的头名是 `runtime.cgocall 99.13%`（`GetMessageW` 阻塞在 syscall 里被采样器当成在跑），不能当结论读；有效信息在 `-cum` 链路：`wndProc 6.75% → window.tick 6.56% → ui.App.Frame 6.46% → App.draw 2.45%`。
+
+第二层用临时计时器把 `window.tick()` 拆成「Frame 耗时 / present 耗时 / 是否绘制」，每 10 秒一行。稳定态读数：
+
+```
+t=30s frames=229 drew=59 空转均=0.04ms 画均=20.88ms 峰值=..ms present=0.75ms
+```
+
+即**不绘制的 tick 只花 0.04 ms，一旦绘制就是二十几毫秒**；空闲只画 1.2–1.5 次/秒。所以瓶颈是单帧成本，不是帧率。
+
+### 78.2 三步优化与读数
+
+| 步骤 | 画均 | 改动 |
+|---|---|---|
+| 原始 | 57.8 ms | `CompositingQualityHighQuality` + `InterpolationModeHighQualityBicubic` |
+| ① 合成质量 + 1:1 不重采样 | 30.6 ms | `internal/win32/ui_shim.cpp` 的 `gt_canvas_new` 改 `CompositingQualityDefault`/`InterpolationModeBilinear`；`gt_draw_image` 加 `unscaled` 判断走 `DrawImage(img,x,y)` |
+| ② 网格层烘不透明底图 | 22.6 ms | `internal/appui/grid.go` 的 `ensureArkGrid(th, backdrop)` 把底色 + 扫描线 + 网格 pre-blend 成不透明 PNG |
+| ③ 不透明底图走 BitBlt | **14.4 ms** | 新增 `gt_draw_image_solid`：`Bitmap::GetHBITMAP` → `HBITMAP` 缓存（最多 4 个）→ `CreateCompatibleDC` + `SRCCOPY` |
+
+`gt_draw_image_solid` 的坐标换算用 `Canvas` 新增的 `scale`/`offX`/`offY`（与 `gt_set_view`、`gt_set_scale` 同步），所以 DPI 缩放和全屏 letterbox 偏移下位置仍然正确。返回值从 `void` 改成 `int`（1/0）：不透明底图贴成功时页面才跳过自己的底色。
+
+### 78.3 消融读数（临时开关，测完已删）
+
+| 变体 | 画均 |
+|---|---|
+| NOGRID | 15.16（无变化，说明整窗贴图已不是瓶颈） |
+| NOTEXT | 10.49（文字约 4 ms） |
+| NOROUND | 30.10（**反向暴涨**，跳过 `FillRoundRect` 会让卡片失去底色，走别的绘制分支，不能当消融用） |
+| NOIMAGE | 10.80 |
+
+### 78.4 顺带修掉的展示 bug
+
+网格层改到内容下方铺底之后，各页原本都会 `FillRect(全窗, 主题底色)`，把网格完全盖住（截图验证：网格彻底消失）。现在 `internal/ui/app.go` 的 `draw` 里算一个 `opaqueBase := a.BgImage != "" || gridBelow`，为真时页面不再铺底色。同时把扫描线 alpha 从 `0x08` 降到 `0x05`、网格线从 `0x10` 降到 `0x09`（它现在是窗口底色，不再是叠在页面上的覆盖），缓存文件名加 `-v2` 后缀避免读到旧图。
+
+### 78.5 实测占用（120 s，主窗口在前台，CODM 同时运行）
+
+```
+main pid=80448 cpu=0.66% of one core / 0.083% of all cores  mem=15.6 MB
+main pid=80448 cpu=1.38% of one core / 0.173% of all cores  mem=20.3 MB
+```
+
+第二条是启动后第一次采样（含初始化与一次内存回收）。对比优化前 3.4–6.8%，达标（硬约束 CPU <1%、内存 <128 MB）。
+
+### 78.6 构建
+
+```
+build.cmd       # 成功，bin\codmtune.exe 12,241,920 bytes
+go vet ./...    # 0
+go test ./...   # 全 ok
+gofmt -l        # 空
+```
+
+临时诊断代码已全部删除：`internal/win32/dbgtick.go`（TICKDBG/IMGDBG）、`window.go` 的计时、`gdiplus.go` 的三处 `dbgSkip*` 与 `DbgImgCall`、`internal/ui/app.go` 的 `dbgForceDraw`/`noGrid`。`grep -rn "dbgSkip\|DbgImg\|dbgForceDraw\|noGrid\|dbgTick"` 无结果。
+
+## 79. 未执行 / 边界（v12.3）
+
+- 14 ms/帧是在 1100×700、终末地浅色、无壁纸的条件下测的；换成带壁纸会把网格层退回半透明叠加，单帧回到约 20 ms。
+- 帧率上限仍由 `IdleFPS`/`GameIdleFPS` 控制（默认 10/5），没有为了省 CPU 降到 1 fps——那样焦点移动会显得卡。
+- 拖拽缩放 HUD、逐像素面板透明仍未实现。

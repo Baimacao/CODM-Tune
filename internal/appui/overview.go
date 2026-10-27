@@ -142,9 +142,11 @@ func (s *screens) tile(r ui.Rect, title, icon string, get func() (string, string
 				c.FillRect(ui.R(rr.X+16, rr.Y+63, 3, 16), th.Mark)
 			}
 			c.Text(ui.R(rr.X+58, rr.Y+14, rr.W-72, 22), title, 13, th.Text, ui.AlignLeft, true)
-			runes := []rune(status)
-			if len(runes) > 14 {
-				status = string(runes[:13]) + "…"
+			// 230 px of room at 12 px type fits about 18 CJK glyphs; cutting
+			// at 14 dropped the distinguishing half of strings like
+			// "限制中 · 2 个 ACE 进程独立".
+			if runes := []rune(status); len(runes) > 18 {
+				status = string(runes[:17]) + "…"
 			}
 			c.Text(ui.R(rr.X+24, rr.Y+62, rr.W-40, 20), status, 12, th.Text, ui.AlignLeft, true)
 			c.TextBlock(ui.R(rr.X+16, rr.Y+90, rr.W-32, 40), detail, 11, th.Muted, ui.AlignLeft, false)
@@ -154,9 +156,8 @@ func (s *screens) tile(r ui.Rect, title, icon string, get func() (string, string
 		c.FillRoundRect(ui.R(rr.X+16, rr.Y+14, 34, 34), 11, col.WithAlpha(26))
 		drawIcon(c, ui.R(rr.X+22, rr.Y+20, 22, 22), icon, col)
 		c.Text(ui.R(rr.X+58, rr.Y+14, rr.W-72, 22), title, 14, th.Text, ui.AlignLeft, true)
-		runes := []rune(status)
-		if len(runes) > 14 {
-			status = string(runes[:13]) + "…"
+		if runes := []rune(status); len(runes) > 18 {
+			status = string(runes[:17]) + "…"
 		}
 		c.Text(ui.R(rr.X+16, rr.Y+62, rr.W-32, 20), status, 13, col, ui.AlignLeft, true)
 		c.TextBlock(ui.R(rr.X+16, rr.Y+88, rr.W-32, 40), detail, 11, th.Muted, ui.AlignLeft, false)

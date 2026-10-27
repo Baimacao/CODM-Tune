@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"runtime/pprof"
+	"strconv"
 	"time"
 
 	"codmtune/internal/appui"
@@ -25,6 +27,26 @@ func main() {
 			sys.MessageBox("CODM Tune 崩溃", "已写入日志：\r\n"+path)
 		}
 	}()
+	// A CPU profile is opt-in through the environment so a shipped build costs
+	// nothing: profiling itself adds overhead, and the whole point is to
+	// measure a build that is otherwise identical.
+	if path := os.Getenv("CODMTUNE_CPUPROFILE"); path != "" {
+		secs := 30
+		if v, err := strconv.Atoi(os.Getenv("CODMTUNE_CPUPROFILE_SEC")); err == nil && v >= 5 && v <= 300 {
+			secs = v
+		}
+		if f, err := os.Create(path); err == nil {
+			_ = pprof.StartCPUProfile(f)
+			go func() {
+				time.Sleep(time.Duration(secs) * time.Second)
+				pprof.StopCPUProfile()
+				_ = f.Close()
+				// The profile covers a fixed window; exiting afterwards keeps
+				// the probe bounded and never leaves profiling on in real use.
+				os.Exit(0)
+			}()
+		}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--crosshair" {
 		if err := crosshair.RunChild(); err != nil {
 			fmt.Fprintln(os.Stderr, "crosshair:", err)
