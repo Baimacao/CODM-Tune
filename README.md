@@ -53,6 +53,7 @@
 - **四类独立音效**：软件启动、选择（焦点移动）、确认（执行/切换）、游戏启动；可分别关闭，音量共用一个总音量。
 - **空闲 CPU**：单帧绘制成本 **14 ms**（原始 58 ms），空闲只画 1.2–1.5 帧/秒，主进程实测 **0.66–1.38% of one core**（8 核的 0.08–0.17%）；工作集 15–22 MB（三分钟一次 `TrimWorkingSet` 后回落）。细节见下方「单帧成本」表。
 
+![概览 · 网格底色在内容之下](docs/assets/overview.png)
 ![FIELD TERMINAL](docs/assets/terminal.png)
 ![二级菜单](docs/assets/choice.png)
 ![悬浮窗](docs/assets/overlay.png)
