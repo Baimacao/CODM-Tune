@@ -128,11 +128,19 @@ type Config struct {
 	// two numbers decide how quickly it drops back after the last input.
 	IdleFPS     int `json:"idle_fps"`
 	GameIdleFPS int `json:"game_idle_fps"`
+
+	// Disk and I/O. The target volume is the one the maintenance rows act on;
+	// it defaults to the game's own drive once an install is detected.
+	DiskTarget   string `json:"disk_target"`
+	DiskIOBoost  bool   `json:"disk_io_boost"`
+	DiskIOLevel  int    `json:"disk_io_level"`
+	DiskLastOpt  int64  `json:"disk_last_opt"`
+	DiskLastTrim int64  `json:"disk_last_trim"`
 }
 
 func defaultConfig() Config {
 	return Config{
-		Version:            14,
+		Version:            15,
 		PowerEnabled:       true,
 		ScheduleEnabled:    true,
 		ACENames:           []string{"SGuard64.exe", "SGuardSvc64.exe"},
@@ -180,6 +188,7 @@ func defaultConfig() Config {
 		MemMask:            int(sys.MemAll),
 		IdleFPS:            20,
 		GameIdleFPS:        10,
+		DiskIOLevel:        3,
 	}
 }
 
@@ -231,6 +240,14 @@ func loadConfig() Config {
 		// The loss estimate is too noisy to be on by default; keep it opt-in.
 		cfg.OverlayLoss = false
 		cfg.Version = 14
+	}
+	if cfg.Version < 15 {
+		// Disk page: the I/O boost defaults to the High level and the target
+		// volume stays empty until the game drive is known.
+		if cfg.DiskIOLevel < 1 || cfg.DiskIOLevel > 3 {
+			cfg.DiskIOLevel = 3
+		}
+		cfg.Version = 15
 	}
 	if len(cfg.ACENames) == 0 {
 		cfg.ACENames = defaultConfig().ACENames

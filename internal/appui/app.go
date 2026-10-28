@@ -43,6 +43,13 @@ type screens struct {
 	oobeStep  int
 	oobeAt    time.Time
 	uiReady   atomic.Bool
+
+	// Disk page: the per-disk I/O rows are appended after the first PDH
+	// sample lands, so the page keeps the list and the insert position.
+	diskWaiting bool
+	diskList    *ui.List
+	diskNext    int
+	diskShown   map[string]bool
 }
 
 // Run wires the controller, the toolkit and the native window together.

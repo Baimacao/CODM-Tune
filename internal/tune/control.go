@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"codmtune/internal/sys"
@@ -201,6 +202,17 @@ type Control struct {
 	timerActive bool
 	overlay     OverlayStats
 	replays     []Replay
+
+	// Disk panel: one cached PDH sample (it needs a 250 ms collection window,
+	// so it can never run on the paint path) plus the last maintenance report.
+	diskIO       []sys.DiskIO
+	diskIOAt     time.Time
+	diskIOErr    string
+	diskSampling atomic.Bool
+	diskFacting  atomic.Bool
+	diskSnap     *diskSnapshot
+	diskLast     sys.VolumeReport
+	diskHasLast  bool
 }
 
 type procSample struct {
@@ -796,6 +808,7 @@ func (c *Control) monitorTick() {
 	if running && !prev {
 		c.logf("检测到 CODM 运行 (pid %d)", pid)
 		c.refreshRegistryState()
+		c.applyDiskIO()
 		if schedOn {
 			c.applySchedule()
 		}

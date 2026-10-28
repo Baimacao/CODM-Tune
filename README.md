@@ -1,5 +1,7 @@
 # CODM TUNE
 
+> v12.4：新增第 15 个分类「硬盘与文件系统」—— 卷容量、每块物理盘的实时读/写/IOPS/队列（PDH，2 秒一采）、碎片分析与 DEFRAG / TRIM（调用系统自带 `defrag.exe`，走 UAC）、以及游戏进程的 I/O 优先级提升（`NtSetInformationProcess` 的 `ProcessIoPriority`，退出即恢复）。全部写操作都先读原值再改，关掉即还原。
+>
 > v12.3：把「重绘一次到底多贵」量到了底 —— 单帧从 **58 ms 压到 14 ms**、空闲 CPU 从 3.4–6.8% 降到 **0.66%**（8 核折算 0.08%）。做法不是降帧率，而是消掉逐像素 alpha 混合：GDI+ 合成质量从 HighQuality 降为 Default、1:1 贴图跳过重采样、网格层烘成不透明底图改走 `BitBlt`/`SRCCOPY`。
 >
 > v12.2：修掉三个真实 bug —— 悬浮窗在「12 秒没采到帧」后会永久停在 N/A（现在 60 秒后自动重试）、悬浮窗不跟随浅色主题（永远深色）、PresentMon 的 CSV 每秒整份重读（改成 256 KB 尾部窗口，约 12 倍）。
@@ -78,6 +80,7 @@
 | 游戏与启动 | 直接启动、安装探测、启动器回退、战绩官方入口 |
 | 性能与调度 | 卓越性能（保留熄屏/休眠）、ACE 限制、后台抑制、系统调度、0.5 ms 计时器 |
 | 系统调优 | 游戏模式、GameDVR、GPU 偏好、内存回收（立即/定期/间隔）；高级：极简外观、优先级、HAGS、全屏优化 |
+| 硬盘与文件系统 | 卷容量与介质（SSD/HDD）、每块物理盘实时读/写/IOPS/队列、碎片分析、DEFRAG 优化、TRIM 重新剪裁、游戏 I/O 优先级；SysMain/Prefetch/TRIM 状态只读 |
 | 画面与 FOV | 持枪 FOV 字节解锁、视野只读说明、帧率无上限、按住写入/还原 |
 | 输入与鼠标 | 鼠标加速、视角启动参数、D3D11、灵敏度快照/还原 |
 | 悬浮窗 | 开关、常驻、二级样式/位置（含自定义 X/Y）、透明度滑块、FPS/1% low/卡顿/按键/纯文字 |
@@ -86,6 +89,18 @@
 | 知识库 | `knowledge/*.md` 列表与阅读 |
 | 设置 | 风格（三套）、强调色/壁纸取色、主题、字体、全屏、圆角、背景、重绘频率、四类音效、高级 |
 | 关于 | 版本、设计目标、安全边界、作者、AI 协作、界面参考；不含无关项目推广 |
+
+## 硬盘与文件系统（v12.4 新增）
+
+![硬盘页 · 卷与实时 I/O](docs/assets/disk.png)
+
+![硬盘页 · 碎片整理与 I/O 优先级](docs/assets/disk-tools.png)
+
+- **卷**：盘符、卷标、文件系统、介质类型（SSD/HDD，来自 `IOCTL_STORAGE_QUERY_PROPERTY` 的 `DeviceSeekPenaltyProperty`）、可用/总量、已用百分比。目标卷右侧标「当前目标」，Enter 改选。
+- **实时 I/O**：PDH 通配实例计数器（`\PhysicalDisk(*)\Disk Read Bytes/sec` 等五路），2 秒一采。「合计吞吐」是 `_Total` 实例；每块物理盘各自一行，读/写 MB/s、IOPS、平均延迟（`Avg. Disk sec/Transfer`）、队列（`Current Disk Queue Length`）。队列 ≥2 变警示色 —— 这是唯一能预测卡顿的读数。
+- **碎片与整理**：分析只读、不需要管理员；整理与 TRIM 调用系统自带 `defrag.exe`（`/O` 与 `/L`），按住 Enter 1.2 秒确认，会走 UAC。SSD 上系统自动把「优化」转成 TRIM，HDD 上才是真正的碎片整理。
+- **游戏 I/O 优先级**：`NtSetInformationProcess` 的 `ProcessIoPriority`（`PROCESSINFOCLASS` 33），低/普通/高三档。检测到 CODM 启动时自动应用，关掉或退出即回普通；提高别的进程需要 `SeIncreaseBasePriorityPrivilege`，本机实测可正常升降。
+- **只读事实**：SysMain 服务状态、`EnablePrefetcher`/`EnableSuperfetch`、卷的 TRIM 状态（`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem` 的 `DisableDeleteNotify`，读不到时显示 `—` 而不是猜一个值）。刻意不提供开关：SSD 上关掉只会让冷启动变慢。
 
 ## 终末地风格（终末地 · 操作台）
 
@@ -96,9 +111,9 @@
 - 两套底色：纸白 STOCK（`#F4F4F2` 纸面 / `#FFFFFF` 板面 / `#161616` 墨）与板黑 BOARD（`#191919` / `#222222` / `#EDEDED`）。
 - **零圆角、零阴影、零发光、零渐变**；可点击的东西才有切角（按钮 8 px、面板 26 px、外框 52 px）。
 - **唯一强调色只做填充**（默认酸柠 `#FFFA00`）：侧栏选中块、主按钮、`CURRENT` 标签、页面顶部起首条。它从不当线条色或文字色 —— 浅色底上那种用法会直接失去对比度。红色只给删除/危险。
-- 中文粗体黑体配宽体大写拉丁（`// 副标题`、`OPERATIONS / 14` 这类全大写小字距标签）。
+- 中文粗体黑体配宽体大写拉丁（`// 副标题`、`OPERATIONS / 15` 这类全大写小字距标签）。
 - 发丝线分区：1 px 边线分块，不用卡片投影。
-- 编号必须真实：`SECTION 01`、`01..14` 侧栏、`OPERATIONS / 14` 都来自实际导航项数量与索引。
+- 编号必须真实：`SECTION 01`、`01..15` 侧栏、`OPERATIONS / 15` 都来自实际导航项数量与索引。
 - 动效短而硬：`cubic-bezier(0.16, 1, 0.3, 1)` 的 snap 与 `(0.7, 0, 0.2, 1)` 的 mech 曲线，不做长弹簧。
 - 只借鉴设计语言，不使用《明日方舟：终末地》的任何美术素材或字体。
 
@@ -106,7 +121,7 @@
 
 ## 舟味风格（参考 BV1wEcqzfE3D / BV1TFs4zvEB5）
 
-- 侧栏：`01..12` 编号、方角选中条、`CODM//TUNE`、`ARMORY SYSTEM / 12`。
+- 侧栏：`01..15` 编号、方角选中条、`CODM//TUNE`、`ARMORY SYSTEM / 15`。
 - 卡片：纸白/墨黑面、左侧主色条、左上/右下斜切角、细网格/扫描线。
 - 按钮/开关：方角高对比；强调色与主色联动。
 - 标题：`// 概览`、`> 副标题`、大号 `01/SECTION` 圆环与半调点。

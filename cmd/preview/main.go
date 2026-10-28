@@ -158,6 +158,24 @@ func main() {
 	events = append(events, sh(9.25, "overlay"))
 	events = append(events, openNav(9.45, "overview")...)
 	events = append(events, sh(10.45, "home-back"))
+	// The storage page sits past the GIF window: it is a still, not part of
+	// the flow, so appending it here keeps every existing timestamp intact.
+	events = append(events, openNav(10.55, "disk")...)
+	events = append(events, sh(11.60, "disk"))
+	// Second still: the maintenance and I/O-priority rows sit below the fold,
+	// so they need their own capture rather than a taller window.
+	events = append(events,
+		mk(11.75, key(ui.KeyPageDown, ui.Press)),
+		mk(11.79, key(ui.KeyPageDown, ui.Release)),
+	)
+	events = append(events, sh(12.25, "disk-mid"))
+	events = append(events,
+		mk(12.35, key(ui.KeyPageDown, ui.Press)),
+		mk(12.39, key(ui.KeyPageDown, ui.Release)),
+		mk(12.50, key(ui.KeyPageDown, ui.Press)),
+		mk(12.54, key(ui.KeyPageDown, ui.Release)),
+	)
+	events = append(events, sh(13.05, "disk-lower"))
 
 	var shots []image.Image
 	var names []string
@@ -167,7 +185,7 @@ func main() {
 
 	frame := 0
 	next := 0
-	for t := float32(0); t < 11.0; t += dt {
+	for t := float32(0); t < 13.3; t += dt {
 		for next < len(events) && events[next].at <= t {
 			e := events[next]
 			if e.shot != "" {

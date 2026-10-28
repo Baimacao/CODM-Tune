@@ -21,6 +21,7 @@ var navItems = []navItem{
 	{"game", "游戏与启动", "gamepad"},
 	{"performance", "性能与调度", "bolt"},
 	{"system", "系统调优", "shield"},
+	{"disk", "硬盘与文件系统", "disc"},
 	{"visual", "画面与 FOV", "monitor"},
 	{"input", "输入与鼠标", "mouse"},
 	{"overlay", "悬浮窗", "window"},
@@ -73,7 +74,7 @@ func (s *screens) rail(root *ui.Node) {
 			drawLogo(c, ui.R(16, 18, 30, 26), th.Primary)
 		}
 		name := "CODM TUNE"
-		sub := "MD3E · v12.2"
+		sub := "MD3E · v12.4"
 		if th.Industrial() {
 			name = "CODM//TUNE"
 			sub = fmt.Sprintf("ARMORY SYSTEM / %02d", len(navItems))
@@ -91,9 +92,13 @@ func (s *screens) rail(root *ui.Node) {
 			c.Text(ui.R(16, WinH-24, RailW-32, 16), "高级模式 · 危险项可见", 10, th.Danger, ui.AlignLeft, true)
 		}
 	}
+	// The rail has to hold every category on a 700 px window. A fixed 42 px
+	// step worked up to fourteen entries and silently pushed the last one
+	// under the footer at fifteen, so the step shrinks to fit instead.
+	railTop, railStep, railRow := railGeometry()
 	for i, it := range navItems {
 		it := it
-		n := ui.NewNode(ui.R(12, 88+float32(i)*42, RailW-24, 38))
+		n := ui.NewNode(ui.R(12, railTop+float32(i)*railStep, RailW-24, railRow))
 		n.Focusable = true
 		n.SetCursorRadius(12)
 		n.Data = "nav:" + it.id
@@ -119,8 +124,9 @@ func (s *screens) rail(root *ui.Node) {
 						labelCol = ui.RGB(0x16, 0x16, 0x16)
 					}
 					num := fmt.Sprintf("%02d", i+1)
-					c.Text(ui.R(rr.X+8, rr.Y+12, 24, 16), num, 9, numCol, ui.AlignLeft, true)
-					drawIcon(c, ui.R(rr.X+34, rr.Y+12, 16, 16), it.icon, iconCol)
+					ty := rr.Y + (rr.H-16)/2
+					c.Text(ui.R(rr.X+8, ty, 24, 16), num, 9, numCol, ui.AlignLeft, true)
+					drawIcon(c, ui.R(rr.X+34, ty, 16, 16), it.icon, iconCol)
 					c.Text(ui.R(rr.X+58, rr.Y, rr.W-64, rr.H), it.label, 12, labelCol, ui.AlignLeft, active)
 					if !active {
 						c.Line(rr.X+58, rr.Bottom()-1, rr.X+rr.W, rr.Bottom()-1, 1, th.Outline)
@@ -131,8 +137,9 @@ func (s *screens) rail(root *ui.Node) {
 					c.FillRect(rr, th.Surface2)
 					c.FillRect(ui.R(rr.X, rr.Y, 3, rr.H), th.Primary)
 				}
-				c.Text(ui.R(rr.X+10, rr.Y+12, 24, 16), fmt.Sprintf("%02d", i+1), 9, th.PrimaryDim, ui.AlignLeft, false)
-				drawIcon(c, ui.R(rr.X+36, rr.Y+12, 16, 16), it.icon, col)
+				ty := rr.Y + (rr.H-16)/2
+				c.Text(ui.R(rr.X+10, ty, 24, 16), fmt.Sprintf("%02d", i+1), 9, th.PrimaryDim, ui.AlignLeft, false)
+				drawIcon(c, ui.R(rr.X+36, ty, 16, 16), it.icon, col)
 				c.Text(ui.R(rr.X+60, rr.Y, rr.W-66, rr.H), it.label, 12, col, ui.AlignLeft, active)
 				c.Line(rr.X+60, rr.Bottom()-1, rr.X+rr.W, rr.Bottom()-1, 1, th.Outline)
 				return
@@ -140,12 +147,38 @@ func (s *screens) rail(root *ui.Node) {
 			if active {
 				c.FillRoundRect(rr, 12, th.PrimaryBg)
 			}
-			drawIcon(c, ui.R(rr.X+12, rr.Y+11, 18, 18), it.icon, col)
+			drawIcon(c, ui.R(rr.X+12, rr.Y+(rr.H-18)/2, 18, 18), it.icon, col)
 			c.Text(ui.R(rr.X+40, rr.Y, rr.W-48, rr.H), it.label, 13, col, ui.AlignLeft, active)
 		}
 		n.Activate = func(*ui.Node) { s.switchTo(it.id) }
 		root.Add(n)
 	}
+}
+
+// railGeometry fits the whole category list between the brand block and the
+// footer. Entries keep the comfortable 42 px step while they fit; past that the
+// step and the row height shrink together so no category is ever clipped.
+func railGeometry() (top, step, row float32) {
+	const (
+		top0      = 88
+		step0     = 42
+		row0      = 38
+		bottomGap = 56
+	)
+	n := float32(len(navItems))
+	if n <= 0 {
+		return top0, step0, row0
+	}
+	avail := float32(WinH-bottomGap) - top0
+	step = step0
+	if fit := avail / n; fit < step {
+		step = fit
+	}
+	row = step - 4
+	if row > row0 {
+		row = row0
+	}
+	return top0, step, row
 }
 
 // headerDraw is the content-area header, shared by every category.
@@ -283,6 +316,8 @@ func (s *screens) build(id string) *ui.Node {
 		return s.perfCat()
 	case "system":
 		return s.systemCat()
+	case "disk":
+		return s.diskCat()
 	case "visual":
 		return s.visualCat()
 	case "input":
@@ -309,9 +344,13 @@ func (s *screens) build(id string) *ui.Node {
 
 // feature is one row: icon, bold name, thin description, trailing control.
 type feature struct {
-	icon     string
-	title    string
+	icon  string
+	title string
+	// desc is static copy. descFn is the live form for rows whose second line
+	// carries a moving number (a sample, a counter): the list is built once, so
+	// a static string would freeze at the value it had when the page opened.
 	desc     string
+	descFn   func() string
 	value    func() string
 	tone     func() tune.Tone
 	toggle   func() bool
@@ -319,6 +358,7 @@ type feature struct {
 	open     func()
 	hold     float32
 	hint     string
+	hintFn   func() string
 	disabled func() bool
 	adjust   func(int)
 	slider   func(float64)
@@ -378,11 +418,20 @@ func (s *screens) featureRow(r ui.Rect, f feature) *ui.Node {
 			}
 			c.Text(ui.R(rr.X+66, rr.Y+36, rr.W-280, 18), f.value(), 12, vc, ui.AlignLeft, false)
 		}
-		if f.desc != "" {
-			c.TextBlock(ui.R(rr.X+66, rr.Y+56, rr.W-150, rr.H-62), f.desc, 12, th.Muted, ui.AlignLeft, false)
+		desc := f.desc
+		if f.descFn != nil {
+			desc = f.descFn()
+		}
+		if desc != "" {
+			c.TextBlock(ui.R(rr.X+66, rr.Y+56, rr.W-150, rr.H-62), desc, 12, th.Muted, ui.AlignLeft, false)
 		}
 		hint := f.hint
-		if hint == "" {
+		// hintFn owns the hint completely: it is used for rows whose action
+		// comes and goes (a job in flight), where the generic default would be
+		// a lie. Returning "" therefore means "no hint", not "use the default".
+		if f.hintFn != nil {
+			hint = f.hintFn()
+		} else if hint == "" {
 			switch {
 			case f.hold > 0:
 				hint = "按住 Enter"

@@ -951,3 +951,69 @@ gofmt -l        # 空
 - 14 ms/帧是在 1100×700、终末地浅色、无壁纸的条件下测的；换成带壁纸会把网格层退回半透明叠加，单帧回到约 20 ms。
 - 帧率上限仍由 `IdleFPS`/`GameIdleFPS` 控制（默认 10/5），没有为了省 CPU 降到 1 fps——那样焦点移动会显得卡。
 - 拖拽缩放 HUD、逐像素面板透明仍未实现。
+
+## 80. v12.4：硬盘与文件系统页
+
+需求来自上一轮会话（m15831）：`加入硬盘io优化与文件系统优化功能`。原则同全项目：**能读的先读，能不改的不改；要改的必须可逆、走系统自带工具、不发明注册表值。**
+
+### 80.1 新增文件
+
+| 文件 | 内容 |
+|---|---|
+| `internal/sys/disk.go` | 卷枚举（`GetLogicalDrives` + `GetVolumeInformationW` + `GetDiskFreeSpaceExW`）、介质判定（`IOCTL_STORAGE_QUERY_PROPERTY` → `StorageDeviceSeekPenaltyProperty`，失败回退 `StorageDeviceProperty` 的 BusType）、PDH 五路通配计数器、`RunDefrag`（`/A` `/O` `/L`）、`TrimEnabled`（读 `DisableDeleteNotify`） |
+| `internal/sys/ioprio.go` | `NtQueryInformationProcess` / `NtSetInformationProcess` 的 `ProcessIoPriority`（`PROCESSINFOCLASS` 33），`SeIncreaseBasePriorityPrivilege` |
+| `internal/sys/service.go` | `QueryServiceControlManager` 只读服务状态 |
+| `internal/tune/disk.go` | 页面用的聚合状态、`RunVolumeAction`、`SetDiskIOBoost` / `SetDiskIOLevel`、`applyDiskIO` / `restoreDiskIO`、只读事实 |
+| `internal/appui/disk.go` | 页面本体（第 5 个导航「硬盘与文件系统」） |
+
+接入点：`internal/appui/shell.go` 的 `navItems` 加 `{"disk", "硬盘与文件系统", "disc"}`（插在「系统调优」之后，后续编号整体后移）；`internal/appui/app.go` 的 `build()` 加 `case "disk"`；`internal/tune/control.go:811` 在检测到 CODM 刚启动时调 `c.applyDiskIO()`；`internal/tune/config.go` 加 `DiskIOBoost` / `DiskIOLevel` 两个字段与 `Version < 15` 迁移（默认档位 3 = 高）。
+
+### 80.2 本机探针实测（写代码前先验证，全部通过）
+
+```
+卷      C: 系统 NTFS SSD 78.0/118.9 GB     D: 游戏 NTFS SSD 15.2/119.2 GB
+        E: 文件 NTFS  —  404.4/465.8 GB     F: 视频 NTFS HDD 314.4/465.8 GB
+PDH     #0 E: / #1 D: / #2 F: / #3 C: / #_Total  —— 五路计数器全部返回
+defrag  analyze C: → ok=true frag=13%
+        "可用空间 = 78.01 GB · 总碎片空间 = 13% · 可用空间的最大大小 = 74.34 GB · 建议对该卷进行碎片整理。"
+TRIM    DisableDeleteNotify 缺失 → 视为启用（true, true）
+I/O 优先级  自身 2(普通)；对子进程 SetIOPriority(high) → 读回 3；再 set normal → 读回 2
+```
+
+几个必须记住的坑：
+
+- **`_Total` 实例要保留**。最初在 `DiskUsage()` 里把它过滤掉了，页面的「合计吞吐」行因此永远拿不到数，只显示「只有单块磁盘，见下一行」——而那台机器有 4 块盘。`_Total` 是 PDH 唯一回答「整机存储有多忙」的实例，必须留着。
+- **`STORAGE_DEVICE_SEEK_PENALTY_DESCRIPTOR` 的 `Size` 字段不能漏**。结构体是 `Version, Size, IncursSeekPenalty`，把布尔直接跟在 Version 后面读到的是 Size，结果每块盘都被判成 HDD。
+- **E: 盘的介质判不出来**（返回空串）。廉价控制器会拒绝 seek-penalty 查询，BusType 也拿不到。页面显示「介质未知」而不是猜 SSD —— 猜错会让用户对 SSD 跑碎片整理。
+- **PDH 第一个采样窗口没有值**。`PdhCollectQueryData` 要调两次、中间隔 250 ms，所以进页面时每盘行是空的。原实现是等 60 ms×40 后整页 `switchTo("disk")` 重建，会在用户刚落地约 1 秒时闪一次切页动画、还会把焦点环甩回去。改成往 `*ui.List` 里按索引 `Insert` 补行（`diskList` / `diskNext` / `diskShown`），只补不重建。
+- **`GetIOPriority(0)` 和 `TrimEnabled()` 都是多返回值**，探针里直接 `fmt.Println` 会编译失败——不是 bug，是签名。
+
+### 80.3 页面结构与交互
+
+- 卷区：`disc` 图标，副行 `NTFS · SSD · 可用 78.0 GB / 共 118.9 GB`，右侧「已用 34%」；目标卷 `ToneGood` + hint「当前目标」，其余 hint「Enter 设为目标」。
+- 实时 I/O 区：「合计吞吐」一行 + 每块物理盘一行。`队列 ≥ 2` 用 `ToneWarn`，其余中性 —— 队列是唯一和卡顿强相关的读数，读写速率高低本身不代表有问题。
+- 维护区：分析（`Enter`）、优化目标卷 / 重新剪裁（`hold: 1.2` 按住确认，因为会走 UAC 且耗时）。
+- 游戏 I/O 优先级区：开关 + 三档滑条（`adjust` + `progress`）。
+- 只读区：SysMain、Prefetch/Superfetch、TRIM，全部 `info: true`，没有开关。
+
+### 80.4 构建与验证
+
+```
+build.cmd        # 成功，bin\codmtune.exe
+go build ./...   # ok
+go vet ./...     # 0
+go test ./...    # 全 ok（crosshair / sound / spring / sys / tune）
+gofmt -l         # 空
+```
+
+三套风格都渲染过（`bin\preview.exe -style standard|ark|endfield -all`，1100×700）：
+
+- 标准 MD3E、舟味工业终端、终末地操作台三套下卷卡、I/O 行、维护行、滑条均无溢出，`OPERATIONS / 15`、`SECTION 05` 与侧栏 `01..15` 编号一致。
+- `cmd/preview/main.go` 为这一页加了 `disk` / `disk-mid` / `disk-lower` 三张定格：页面比一屏长，维护区和优先级区必须滚下去才看得到，只截第一屏等于没验。
+
+### 80.5 未执行 / 边界（v12.4）
+
+- 实机回归未做：真机上点「优化目标卷」会真跑 `defrag`（几分钟），「提高 I/O 优先级」要有 CODM 在跑才看得出效果。这两项需要用户实机确认。
+- 介质判定对 USB / 虚拟盘仍可能返回「未知」，没有做 `IOCTL_STORAGE_QUERY_PROPERTY` 的第二种回退（`StorageAdapterProperty`）。
+- I/O 优先级只作用于游戏进程本身，不处理 ACE 子进程；也不做「进程退出后自动恢复」——进程没了优先级自然消失，无需恢复。
+- 没做磁盘健康（SMART）读取：需要 `IOCTL_SMART_RECEIVE_DRIVE_DATA`，且在部分 NVMe 上要走 `IOCTL_STORAGE_PROTOCOL_COMMAND`，两种路径都要单独验证，本轮不做。
