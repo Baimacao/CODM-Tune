@@ -41,6 +41,7 @@ type gpuProcs struct {
 	fillLinear  *syscall.LazyProc
 	fillRadial  *syscall.LazyProc
 	shadow      *syscall.LazyProc
+	readPixels  *syscall.LazyProc
 }
 
 var (
@@ -113,6 +114,7 @@ func LoadGPU() error {
 		fillLinear:  dll.NewProc("gtg_fill_linear"),
 		fillRadial:  dll.NewProc("gtg_fill_radial"),
 		shadow:      dll.NewProc("gtg_shadow"),
+		readPixels:  dll.NewProc("gtg_read_pixels"),
 	}
 	// Resolve before calling: a missing export would panic inside Call.
 	for _, pr := range []*syscall.LazyProc{
@@ -208,6 +210,24 @@ func (s *GpuSurface) Present() bool {
 	}
 	r, _, _ := gpu.present.Call(s.P)
 	return r == 0
+}
+
+// ReadPixels copies the back buffer into dst as BGRA rows, top row first,
+// matching Surface.Pixels(). It is a harness-only path: the live window never
+// reads back, it just presents.
+func (s *GpuSurface) ReadPixels(dst []byte) error {
+	if s == nil || s.P == 0 {
+		return fmt.Errorf("no surface")
+	}
+	need := s.W * s.H * 4
+	if len(dst) < need {
+		return fmt.Errorf("buffer too small: %d < %d", len(dst), need)
+	}
+	r, _, _ := gpu.readPixels.Call(s.P, uintptr(unsafe.Pointer(&dst[0])), uintptr(s.W*4))
+	if r != 0 {
+		return fmt.Errorf("read pixels failed: %d", r)
+	}
+	return nil
 }
 
 func (s *GpuSurface) Close() {

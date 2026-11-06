@@ -15,7 +15,7 @@ func (s *screens) aboutCat() *ui.Node {
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 112), feature{
 		icon: "book", title: "CODM Tune", info: true,
 		desc:  "Go + Win32/GDI+ 原生界面，独立进程悬浮窗；不注入游戏、不读写游戏内存、不结束或挂起 ACE。",
-		value: func() string { return "v12.7 · FIELD TERMINAL" },
+		value: func() string { return "v12.7.2 · FIELD TERMINAL" },
 		hint:  "安全边界",
 	}))
 

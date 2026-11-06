@@ -59,6 +59,11 @@ inline D2D1_COLOR_F toColor(unsigned argb) {
 struct GpuSurface {
     HWND hwnd = nullptr;
     UINT w = 0, h = 0;
+    // The D2D transform persists across frames; the GDI+ canvas gets a fresh
+    // Graphics each frame. Remembering the view here lets every new frame
+    // start from the same state the caller last asked for.
+    float scale = 1.0f;
+    int offX = 0, offY = 0;
     ComPtr<IDXGISwapChain1> swap;
     ComPtr<ID2D1DeviceContext> ctx;
     ComPtr<ID2D1Bitmap1> target;
@@ -119,6 +124,11 @@ IDWriteTextFormat* getFormat(int size, int bold) {
         if (r.size == size && r.bold == bold) return r.fmt.Get();
     if (!g.dwrite) return nullptr;
     ComPtr<IDWriteTextFormat> fmt;
+    // The size the UI passes is a pixel height, and DWrite's fontSize is an em
+    // size in DIPs. At 96 DPI those agree, so the value goes straight through.
+    // GDI+ draws with UnitPixel, so glyphs land at the same nominal height.
+    // Sub-pixel advance differences remain, but nothing in the layout is
+    // derived from measured text, so they never move a rect.
     if (FAILED(g.dwrite->CreateTextFormat(g.familyName.c_str(), nullptr,
             bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
@@ -316,14 +326,14 @@ bool buildShadow(GpuCanvas* c, int blur, unsigned argb) {
 // 108 per frame for twelve cards. Card sizes are few and fixed, so the whole
 // shadow is baked once per (w,h) and blitted with a single call.
 struct ShadowBaked {
-    int w, h, blur;
+    int w, h, blur, rad;
     ComPtr<ID2D1Bitmap> bmp;
 };
 std::vector<ShadowBaked> g_shadowBaked;
 
-ID2D1Bitmap* bakedShadow(GpuCanvas* c, int w, int h, int blur, unsigned argb) {
+ID2D1Bitmap* bakedShadow(GpuCanvas* c, int w, int h, int blur, int rad, unsigned argb) {
     for (auto& e : g_shadowBaked)
-        if (e.w == w && e.h == h && e.blur == blur) return e.bmp.Get();
+        if (e.w == w && e.h == h && e.blur == blur && e.rad == rad) return e.bmp.Get();
     if (!c || !c->surf || !c->surf->ctx) return nullptr;
 
     int inset = blur * 2;
@@ -336,11 +346,14 @@ ID2D1Bitmap* bakedShadow(GpuCanvas* c, int w, int h, int blur, unsigned argb) {
     float sr = ((argb >> 16) & 0xFF) / 255.0f;
     float sg = ((argb >> 8) & 0xFF) / 255.0f;
     float sb = (argb & 0xFF) / 255.0f;
-    float rad = 12.0f;
+    // The shadow has to trace the card's own corner or the soft edge pulls
+    // away from the border on wide-radius cards and bunches up on square ones.
+    // 12 was a leftover from the first MD3E card and never matched anything.
+    float radf = (float)(rad > 0 ? rad : 0);
     for (int y = 0; y < sh; y++) {
         for (int x = 0; x < sw; x++) {
             float d = distanceToRoundRect((float)x + 0.5f, (float)y + 0.5f, (float)sw,
-                                          (float)sh, rad);
+                                          (float)sh, radf + (float)inset);
             float a = 0.0f;
             if (d <= 0) {
                 a = peak;
@@ -372,6 +385,7 @@ ID2D1Bitmap* bakedShadow(GpuCanvas* c, int w, int h, int blur, unsigned argb) {
     rec.w = w;
     rec.h = h;
     rec.blur = blur;
+    rec.rad = rad;
     rec.bmp = bmp;
     g_shadowBaked.push_back(rec);
     return g_shadowBaked.back().bmp.Get();
@@ -587,6 +601,45 @@ __declspec(dllexport) int gtg_resize(void* p, int w, int h) {
     return bindTarget(s) ? 0 : 3;
 }
 
+// gtg_read_pixels copies the back buffer into a caller-owned BGRA buffer.
+// It exists for the headless parity harness: without it the only way to see
+// what the GPU path actually drew is to capture a live window, and a live
+// window carries scroll position, focus and live readouts that make a pixel
+// comparison against the software path meaningless.
+//
+// The swap chain uses a flip model, and a flip-model back buffer cannot be
+// mapped. CopyResource into a staging texture is the supported read-back path.
+__declspec(dllexport) int gtg_read_pixels(void* p, unsigned char* dst, int stride) {
+    GpuSurface* s = (GpuSurface*)p;
+    if (!s || !s->swap || !dst || !g.d3d) return 1;
+    ComPtr<IDXGISurface> back;
+    if (FAILED(s->swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return 2;
+    ComPtr<ID3D11Texture2D> tex;
+    if (FAILED(back.As(&tex))) return 3;
+    D3D11_TEXTURE2D_DESC d = {};
+    tex->GetDesc(&d);
+    d.Usage = D3D11_USAGE_STAGING;
+    d.BindFlags = 0;
+    d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    d.MiscFlags = 0;
+    ComPtr<ID3D11Texture2D> staging;
+    if (FAILED(g.d3d->CreateTexture2D(&d, nullptr, &staging))) return 4;
+    ComPtr<ID3D11DeviceContext> dc;
+    g.d3d->GetImmediateContext(&dc);
+    if (!dc) return 5;
+    dc->CopyResource(staging.Get(), tex.Get());
+    D3D11_MAPPED_SUBRESOURCE m = {};
+    if (FAILED(dc->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &m))) return 6;
+    int row = (int)s->w * 4;
+    if (stride <= 0) stride = row;
+    int copy = row < stride ? row : stride;
+    for (UINT y = 0; y < s->h; y++)
+        memcpy(dst + (size_t)y * stride, (const unsigned char*)m.pData + (size_t)y * m.RowPitch,
+               (size_t)copy);
+    dc->Unmap(staging.Get(), 0);
+    return 0;
+}
+
 __declspec(dllexport) int gtg_present(void* p) {
     GpuSurface* s = (GpuSurface*)p;
     if (!s || !s->swap) return 1;
@@ -602,7 +655,15 @@ __declspec(dllexport) void* gtg_canvas_new(void* surf, unsigned clearArgb) {
     if (!s || !s->ctx) return nullptr;
     GpuCanvas* c = new GpuCanvas();
     c->surf = s;
+    c->scale = s->scale;
+    c->offX = s->offX;
+    c->offY = s->offY;
     s->ctx->BeginDraw();
+    // Reset every frame. Without this a frame that rebuilds its content (a
+    // style switch) inherits the previous view transform and every clip and
+    // primitive lands in the wrong place.
+    s->ctx->SetTransform(D2D1::Matrix3x2F::Scale(c->scale, c->scale) *
+                         D2D1::Matrix3x2F::Translation((FLOAT)c->offX, (FLOAT)c->offY));
     s->ctx->Clear(toColor(clearArgb));
     s->ctx->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     s->ctx->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
@@ -628,7 +689,17 @@ __declspec(dllexport) void gtg_fill_rect(void* p, int x, int y, int w, int h, un
     if (!c || w <= 0 || h <= 0) return;
     ID2D1SolidColorBrush* b = getBrush(c, argb);
     if (!b) return;
+    // Axis-aligned integer rects must be pixel-exact. Under PER_PRIMITIVE
+    // antialiasing a rect covering exactly one pixel still spreads half its
+    // alpha into the neighbouring row and column, so an opaque fill never
+    // fully replaces what is underneath. The endfield cut corners are drawn
+    // by erasing 1 px staircase steps back to the background colour, and that
+    // leftover alpha is exactly what showed up as diagonal smears leaking past
+    // the card border. Aliased filling is what the GDI+ path effectively does
+    // here, so it also keeps the two backends pixel-identical.
+    c->surf->ctx->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
     c->surf->ctx->FillRectangle(D2D1::RectF((FLOAT)x, (FLOAT)y, (FLOAT)(x + w), (FLOAT)(y + h)), b);
+    c->surf->ctx->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 }
 
 __declspec(dllexport) void gtg_fill_round(void* p, int x, int y, int w, int h, int rad, unsigned argb) {
@@ -755,6 +826,9 @@ __declspec(dllexport) void gtg_set_view(void* p, int milli, int ox, int oy) {
     c->scale = milli / 1000.0f;
     c->offX = ox;
     c->offY = oy;
+    c->surf->scale = c->scale;
+    c->surf->offX = ox;
+    c->surf->offY = oy;
     c->surf->ctx->SetTransform(D2D1::Matrix3x2F::Scale(c->scale, c->scale) *
                                D2D1::Matrix3x2F::Translation((FLOAT)ox, (FLOAT)oy));
 }
@@ -765,6 +839,9 @@ __declspec(dllexport) void gtg_set_scale(void* p, int milli) {
     c->scale = milli / 1000.0f;
     c->offX = 0;
     c->offY = 0;
+    c->surf->scale = c->scale;
+    c->surf->offX = 0;
+    c->surf->offY = 0;
     c->surf->ctx->SetTransform(D2D1::Matrix3x2F::Scale(c->scale, c->scale));
 }
 
@@ -858,7 +935,7 @@ __declspec(dllexport) void gtg_shadow(void* p, int x, int y, int w, int h, int r
                                      unsigned argb) {
     GpuCanvas* c = (GpuCanvas*)p;
     if (!c || w <= 0 || h <= 0 || blur <= 0) return;
-    if (ID2D1Bitmap* b = bakedShadow(c, w, h, blur, argb)) {
+    if (ID2D1Bitmap* b = bakedShadow(c, w, h, blur, rad, argb)) {
         int inset = blur * 2;
         // One pixel low so the light reads as coming from above.
         D2D1_RECT_F dst = D2D1::RectF((FLOAT)(x - inset), (FLOAT)(y - inset + 1),
