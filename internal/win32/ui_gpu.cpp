@@ -102,6 +102,11 @@ ID2D1SolidColorBrush* getBrush(GpuCanvas* c, unsigned argb) {
     }
     ComPtr<ID2D1SolidColorBrush> b;
     if (FAILED(c->surf->ctx->CreateSolidColorBrush(toColor(argb), &b))) return nullptr;
+    // Bounded: the themes define ~135 colours and WithAlpha() multiplies that
+    // by every opacity the UI uses, so an unbounded cache would keep growing
+    // for the life of the process. Evicting the oldest is cheap here because a
+    // miss is one CreateSolidColorBrush and the working set is stable.
+    if (g_brushes.size() >= 256) g_brushes.erase(g_brushes.begin());
     BrushRec rec;
     rec.argb = argb;
     rec.brush = b;
@@ -696,6 +701,16 @@ __declspec(dllexport) void gtg_text(void* p, int x, int y, int w, int h, const W
                                    : (align == 2 ? DWRITE_TEXT_ALIGNMENT_TRAILING
                                                  : DWRITE_TEXT_ALIGNMENT_LEADING));
     f->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    // Wrapped text must not also be trimmed: getFormat installs an ellipsis
+    // trimming sign for the single-line case, and leaving it on made every
+    // multi-line description collapse to one ellipsised line.
+    if (wrap) {
+        DWRITE_TRIMMING none = {DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0};
+        f->SetTrimming(&none, nullptr);
+    } else {
+        DWRITE_TRIMMING tr = {DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        f->SetTrimming(&tr, g.ellipsis.Get());
+    }
     c->surf->ctx->DrawText(s, (UINT32)wcslen(s), f, D2D1::RectF((FLOAT)x, (FLOAT)y, (FLOAT)(x + w),
                                                                (FLOAT)(y + h)), b,
                            D2D1_DRAW_TEXT_OPTIONS_CLIP);
