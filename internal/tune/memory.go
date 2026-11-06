@@ -19,6 +19,9 @@ type MemState struct {
 	NextUnix   int64
 	Failed     []string
 	Note       string
+	// GameSkip is true when automatic reclamation is configured but the
+	// game is up, so the pass is being held back on purpose.
+	GameSkip bool
 }
 
 // MemStat returns the live physical-memory snapshot.
@@ -53,7 +56,8 @@ func (c *Control) MemState() MemState {
 	case !st.Auto:
 		st.Note = "自动回收关闭，仅手动执行"
 	case gameRunning:
-		st.Note = "游戏运行中按更短间隔回收（不影响游戏进程本身）"
+		st.GameSkip = true
+		st.Note = "CODM 运行中，自动回收已暂停；退出游戏后恢复"
 	default:
 		st.Note = "空闲时按设定间隔回收"
 	}
@@ -150,10 +154,14 @@ func (c *Control) memLoop() {
 			if cfg.MemLastUnix != 0 && time.Since(time.Unix(cfg.MemLastUnix, 0)) < time.Duration(gap)*time.Minute {
 				continue
 			}
-			// Do not run while the game window is in the foreground and under
-			// load: the purge itself is cheap, but a standby purge mid-match
-			// can cost one frame on a machine that is already short on RAM.
-			if running && cfg.MemGameGap >= 60 {
+			// Never reclaim while CODM is up. The purge itself is cheap,
+			// but what it throws away is not: the standby list is where the
+			// textures the renderer just streamed in live. Emptying it
+			// forces the next frames to fault them back in from disk, which
+			// shows up as exactly the symptom users report -- a lower 1%
+			// low with no drop in average FPS. v12.4 allowed this on a
+			// six-minute timer.
+			if running {
 				continue
 			}
 			c.RunMemory(sys.MemMask(cfg.MemMask))

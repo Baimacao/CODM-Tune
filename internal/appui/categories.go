@@ -231,7 +231,7 @@ func (s *screens) systemCat() *ui.Node {
 	}))
 	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
 		icon: "gauge", title: "自动定期回收",
-		desc: "空闲按间隔执行；游戏运行时改用更短间隔。默认开启，间隔可调。",
+		desc: "空闲时按间隔执行；CODM 运行时自动暂停。默认关闭，需要时再开。",
 		value: func() string {
 			st := s.c.MemState()
 			if !st.Auto {
@@ -241,7 +241,7 @@ func (s *screens) systemCat() *ui.Node {
 			if st.NextUnix > 0 {
 				next = time.Unix(st.NextUnix, 0).Format("15:04")
 			}
-			return fmt.Sprintf("%d 分钟 · 游戏时 %d 分钟 · 下次 %s", st.Interval, s.c.Cfg().MemGameGap, next)
+			return fmt.Sprintf("%d 分钟 · 下次 %s", st.Interval, next)
 		},
 		toggle:   func() bool { return s.c.Cfg().MemAuto },
 		onToggle: func(on bool) { s.c.Update(func(c *tune.Config) { c.MemAuto = on }) },
@@ -263,22 +263,16 @@ func (s *screens) systemCat() *ui.Node {
 		},
 		progress: func() float64 { return float64(s.c.Cfg().MemInterval-5) / 235 },
 	}))
-	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 92), feature{
-		icon: "gamepad", title: "游戏时间隔",
-		desc:  "CODM 运行时的回收间隔；内存紧张时更短的间隔更有意义。",
-		value: func() string { return fmt.Sprintf("%d 分钟", s.c.Cfg().MemGameGap) },
-		adjust: func(d int) {
-			s.c.Update(func(c *tune.Config) {
-				c.MemGameGap += d * 2
-				if c.MemGameGap < 2 {
-					c.MemGameGap = 2
-				}
-				if c.MemGameGap > 60 {
-					c.MemGameGap = 60
-				}
-			})
+	l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
+		icon: "gamepad", title: "游戏运行时",
+		desc: "CODM 运行时自动回收一律暂停。待机列表里是刚读进来的贴图，清掉它们等于让下一帧重新读盘——那正是 1% low 掉下去的原因。",
+		value: func() string {
+			if s.c.MemState().GameSkip {
+				return "运行中 · 已暂停"
+			}
+			return "游戏未运行 · 按空闲间隔"
 		},
-		progress: func() float64 { return float64(s.c.Cfg().MemGameGap-2) / 58 },
+		info: true,
 	}))
 
 	if cfg.Advanced {
@@ -303,7 +297,31 @@ func (s *screens) systemCat() *ui.Node {
 				onToggle: func(on bool) { s.c.SetTweak(t.id, on) },
 			}))
 		}
-	} else {
+	}
+
+	s.section(l, "文件系统与定时器（RyTuneX 对位项）")
+	for _, t := range []struct{ id, icon, name, desc string }{
+		{"ntfsmem", "disc", "NTFS 元数据缓存", "给 MFT 与目录索引更多缓存，大目录遍历更快；需重启。"},
+		{"longpaths", "window", "长路径支持", "解除 260 字符路径限制，深层目录不再报路径过长；需重启。"},
+		{"prefetch", "bolt", "恢复预读", "把被各种「优化」关掉的预读打开；关着它每次读资源都要真读盘。"},
+		{"gtr", "gauge", "全局定时器请求", "Win10 2004+ 让定时器精度请求全局生效，减少帧时间抖动；需重启。"},
+	} {
+		t := t
+		l.Add(s.featureRow(ui.R(PadX, 0, RowW, 96), feature{
+			icon: t.icon, title: t.name, desc: t.desc,
+			value: func() string { return s.c.TweakNote(t.id) },
+			tone: func() tune.Tone {
+				if s.c.TweakOn(t.id) {
+					return tune.ToneGood
+				}
+				return tune.ToneNeutral
+			},
+			toggle:   func() bool { return s.c.TweakOn(t.id) },
+			onToggle: func(on bool) { s.c.SetTweak(t.id, on) },
+		}))
+	}
+
+	if !cfg.Advanced {
 		hint := ui.NewNode(ui.R(PadX, 0, RowW, 40))
 		hint.Draw = func(n *ui.Node, c ui.Painter, r ui.Rect) {
 			c.Text(ui.R(r.X+2, r.Y+10, r.W, 20), "高级项已隐藏 · 在设置中开启高级模式后显示", 11, ui.CurrentTheme.Muted, ui.AlignLeft, false)

@@ -176,6 +176,19 @@ func main() {
 		mk(12.54, key(ui.KeyPageDown, ui.Release)),
 	)
 	events = append(events, sh(13.05, "disk-lower"))
+	// The filesystem group was appended below the advanced block on the
+	// system page, so it needs its own scrolled capture.
+	events = append(events, openNav(13.20, "system")...)
+	events = append(events, sh(14.10, "system-top"))
+	events = append(events,
+		mk(14.25, key(ui.KeyPageDown, ui.Press)),
+		mk(14.29, key(ui.KeyPageDown, ui.Release)),
+		mk(14.40, key(ui.KeyPageDown, ui.Press)),
+		mk(14.44, key(ui.KeyPageDown, ui.Release)),
+		mk(14.55, key(ui.KeyPageDown, ui.Press)),
+		mk(14.59, key(ui.KeyPageDown, ui.Release)),
+	)
+	events = append(events, sh(15.10, "system-fs"))
 
 	var shots []image.Image
 	var names []string
@@ -185,7 +198,7 @@ func main() {
 
 	frame := 0
 	next := 0
-	for t := float32(0); t < 13.3; t += dt {
+	for t := float32(0); t < 15.4; t += dt {
 		for next < len(events) && events[next].at <= t {
 			e := events[next]
 			if e.shot != "" {

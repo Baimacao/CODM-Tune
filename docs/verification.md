@@ -1017,3 +1017,63 @@ gofmt -l         # 空
 - 介质判定对 USB / 虚拟盘仍可能返回「未知」，没有做 `IOCTL_STORAGE_QUERY_PROPERTY` 的第二种回退（`StorageAdapterProperty`）。
 - I/O 优先级只作用于游戏进程本身，不处理 ACE 子进程；也不做「进程退出后自动恢复」——进程没了优先级自然消失，无需恢复。
 - 没做磁盘健康（SMART）读取：需要 `IOCTL_SMART_RECEIVE_DRIVE_DATA`，且在部分 NVMe 上要走 `IOCTL_STORAGE_PROTOCOL_COMMAND`，两种路径都要单独验证，本轮不做。
+
+---
+
+## 81. v12.5：收回自动内存回收的默认值 + 四个文件系统项
+
+### 81.1 起因（实测反馈，不是推测）
+
+用户反馈「装了优化器反而更卡、1% low 更低」。读 `%APPDATA%\CODMTune\config.json` 与 `codmtune.log`：
+
+- `mem_auto=true`、`mem_game_interval=6`、`mem_mask=63`（六步全开，含清空待机列表）。
+- 一个晚上 7 次回收，每次释放 3.8–6.2 GB（21:05 / 21:12 / 21:19 / 21:26 / 21:29 / 21:35 / 21:42）。
+- 机器 15.88 GB，回收前可用已有 7–9 GB —— 不缺内存，却仍在清。
+
+待机列表装的是刚读进来的贴图。清掉之后下一帧要重新读盘，症状正是「平均帧不掉、1% low 掉下去」。这是工具自己造成的，不是游戏的问题。
+
+### 81.2 三处改动
+
+1. **默认值**：`defaultConfig()` 的 `MemAuto` 改为 `false`。
+2. **运行时保护**：`memLoop` 里 `if running { continue }` —— CODM 一起就停，不再有「游戏时间隔」这条路径。原先那条 `running && cfg.MemGameGap >= 60` 的豁免删掉，因为它只在间隔 ≥60 分钟时才拦，而默认值是 10。
+3. **迁移持久化**：`loadConfig()` 此前只改内存里的 `cfg.Version`，不写盘，导致同一个迁移每次启动都重跑 —— 用户把开关打开，下次启动又被改回关闭。现在记录 `before := cfg.Version`，末尾若发生变化则 `saveConfig`。只读目录下写入失败不影响启动。
+
+`MemState` 新增 `GameSkip`，界面据此显示「CODM 运行中，自动回收已暂停」；原「游戏时间隔」滑条（已无意义）换成只读说明行。
+
+### 81.3 四个新系统项（默认关闭、保存原值）
+
+| ID | 名称 | 写入 |
+| --- | --- | --- |
+| `ntfsmem` | NTFS 元数据缓存 | `FileSystem\NtfsMemoryUsage=2` |
+| `longpaths` | 长路径支持 | `FileSystem\LongPathsEnabled=1` |
+| `prefetch` | 恢复预读 | `PrefetchParameters\EnablePrefetcher/EnableSuperfetch=3` |
+| `gtr` | 全局定时器请求 | `Session Manager\kernel\GlobalTimerResolutionRequests=1` |
+
+前三项对位 RyTuneX 的 `OptimizeNTFS` / 预读开关；`gtr` 是 Win10 2004+ 才有的键，RyTuneX 未收录。全部走既有 `TweakDef` / `TweakSet` / `TweakSnaps` 框架，关掉即还原。
+
+**刻意没抄**：`useplatformclock true`（强制 HPET）与 `disabledynamictick yes`。这两条在 Win10 上是旧世代经验，实测经常更差；RyTuneX 有，本工具不收。同样没收 IFEO `Debugger=taskkill.exe` 那套遥测劫持。
+
+### 81.4 验证
+
+```
+go build ./...   ok
+go vet ./...     0
+go test ./...    全 ok（新增 tweaks_test.go：可逆性、默认关闭、全新配置不排程）
+gofmt -l         空
+build.cmd        ok → bin\codmtune.exe / bin\preview.exe
+```
+
+迁移实测（临时 profile，v15 + `mem_auto=true`）：
+
+```
+首次启动 → version=16 mem_auto=false fov=95 tweaks 保留 → 已写回磁盘
+手动改回 mem_auto=true 再启动 → 保持 true（迁移只跑一次）
+```
+
+界面：`bin\preview.exe -style ark -theme light -all` 新增 `system-top` / `system-fs` 两张定格，确认新分组渲染正常、无溢出。
+
+### 81.5 未做 / 边界
+
+- **VBS 未关**：本机 `VirtualizationBasedSecurityStatus=2`、`HypervisorPresent=True`，而 Xeon E3-1275 v3（Haswell）无 MBEC，VBS 靠模拟有实打实的开销。但关它要 `bcdedit /set hypervisorlaunchtype off` + 重启，且连带关掉 Hyper-V / WSL2 / Docker —— 影响面超出本工具，交用户决定，本轮不写。
+- **未做 A/B 数据**：本次修的是「已知会伤性能的默认值」，不是「证明某个开关提升帧率」。真正的因果验证要用户打一局前后对比，工具自带的帧率记录可以做，但不属于本次改动范围。
+- ACE 资源限制（Idle + 单核）仍在，默认关闭，但用户当前是开着的 —— 反作弊跑在 Idle 上会拖长完整性校验，这是第二个待验证项，同样需要实测数据，本轮不改默认。

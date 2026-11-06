@@ -140,7 +140,7 @@ type Config struct {
 
 func defaultConfig() Config {
 	return Config{
-		Version:            15,
+		Version:            16,
 		PowerEnabled:       true,
 		ScheduleEnabled:    true,
 		ACENames:           []string{"SGuard64.exe", "SGuardSvc64.exe"},
@@ -182,13 +182,18 @@ func defaultConfig() Config {
 		CrosshairOutline:   true,
 		TweakSnaps:         map[string][]RegSnap{},
 		Tweaks:             map[string]bool{},
-		MemAuto:            true,
-		MemInterval:        30,
-		MemGameGap:         10,
-		MemMask:            int(sys.MemAll),
-		IdleFPS:            20,
-		GameIdleFPS:        10,
-		DiskIOLevel:        3,
+		// Reclamation is opt-in. Through v12.4 a fresh install started
+		// evicting the standby list on a timer before the user asked for
+		// it. On a 16 GB machine that costs frames instead of gaining
+		// any: the list being emptied holds the textures the renderer
+		// just streamed in.
+		MemAuto:     false,
+		MemInterval: 30,
+		MemGameGap:  10,
+		MemMask:     int(sys.MemAll),
+		IdleFPS:     20,
+		GameIdleFPS: 10,
+		DiskIOLevel: 3,
 	}
 }
 
@@ -216,6 +221,11 @@ func loadConfig() Config {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return defaultConfig()
 	}
+	// Every migration below is one-shot. Persist the result before returning,
+	// otherwise the file keeps its old version number and the same migration
+	// runs again on the next launch -- which silently reverts any choice the
+	// user made in between.
+	before := cfg.Version
 	if cfg.Version < 9 {
 		// The HUD split 1% low / stutter / loss into independent switches in
 		// v9. Older configs had them implicitly on; preserve that intent for
@@ -240,6 +250,16 @@ func loadConfig() Config {
 		// The loss estimate is too noisy to be on by default; keep it opt-in.
 		cfg.OverlayLoss = false
 		cfg.Version = 14
+	}
+	if cfg.Version < 16 {
+		// v12.4 shipped automatic reclamation on by default and had no
+		// guard against running it while the game was up. Anyone who
+		// never touched the switch inherited a timer that purged their
+		// texture cache every few minutes. Switch it off once and leave
+		// the choice to them: nothing is deleted, the row is one click
+		// away.
+		cfg.MemAuto = false
+		cfg.Version = 16
 	}
 	if cfg.Version < 15 {
 		// Disk page: the I/O boost defaults to the High level and the target
@@ -363,6 +383,11 @@ func loadConfig() Config {
 	}
 	if cfg.GameIdleFPS < 5 || cfg.GameIdleFPS > 30 {
 		cfg.GameIdleFPS = 10
+	}
+	if cfg.Version != before {
+		// Best effort: a read-only profile must still boot, it just keeps
+		// re-migrating until the directory is writable again.
+		_ = saveConfig(cfg)
 	}
 	return cfg
 }

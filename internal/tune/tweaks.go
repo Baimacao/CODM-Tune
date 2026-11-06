@@ -130,6 +130,35 @@ func (c *Control) tweakDefs() map[string]TweakDef {
 			Desc: "为 CODM.exe 写入 AppCompatFlags 层，绕过 Windows 的全屏优化合成；可逆，高级项。",
 			Sets: []TweakSet{{Key: `HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers`, Name: exe, Kind: "sz", OnS: "~ DISABLEDXMAXIMIZEDWINDOWEDMODE"}},
 		},
+		// ---- filesystem (RyTuneX OptimizeNTFS parity, plus the two NTFS
+		// switches it does not ship). Everything here is a documented value
+		// with a saved original; nothing is deleted.
+		"ntfsmem": {
+			ID: "ntfsmem", Name: "NTFS 元数据缓存",
+			Desc:   "HKLM\\...\\Control\\FileSystem NtfsMemoryUsage=2；给 NTFS 的 MFT 与目录索引更多缓存，目录遍历与大目录打开更快。需重启。",
+			Sets:   []TweakSet{{Key: `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`, Name: "NtfsMemoryUsage", Kind: "dword", On: 2}},
+			Reboot: true,
+		},
+		"longpaths": {
+			ID: "longpaths", Name: "长路径支持",
+			Desc:   "HKLM\\...\\Control\\FileSystem LongPathsEnabled=1；解除 260 字符路径限制，深层目录不再报路径过长。需重启，部分老程序可能不兼容。",
+			Sets:   []TweakSet{{Key: `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`, Name: "LongPathsEnabled", Kind: "dword", On: 1}},
+			Reboot: true,
+		},
+		"prefetch": {
+			ID: "prefetch", Name: "恢复预读",
+			Desc: "PrefetchParameters EnablePrefetcher/EnableSuperfetch=3；把被各种「优化」关掉的预读打开。关掉它会让每次读资源都真的读盘。",
+			Sets: []TweakSet{
+				{Key: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters`, Name: "EnablePrefetcher", Kind: "dword", On: 3},
+				{Key: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters`, Name: "EnableSuperfetch", Kind: "dword", On: 3},
+			},
+		},
+		"gtr": {
+			ID: "gtr", Name: "全局定时器请求",
+			Desc:   "Session Manager\\kernel GlobalTimerResolutionRequests=1；Win10 2004+ 让进程的定时器精度请求作用于全局，对定时器敏感的引擎减少帧时间抖动。需重启。",
+			Sets:   []TweakSet{{Key: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel`, Name: "GlobalTimerResolutionRequests", Kind: "dword", On: 1}},
+			Reboot: true,
+		},
 		"gpupref": {
 			ID: "gpupref", Name: "GPU 高性能偏好",
 			Desc: "在 DirectX UserGpuPreferences 中把 CODM.exe 标记为高性能 GPU；双显卡机器直接受益。",
