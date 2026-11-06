@@ -38,3 +38,19 @@ func (w *window) chromeHit(x, y float32) int {
 	}
 	return 0
 }
+
+// drawChromeGpu is drawChrome against the D2D canvas. Same geometry, so the
+// two backends cannot drift apart.
+func (w *window) drawChromeGpu(c *GpuCanvas) {
+	if w.fs || c == nil {
+		return
+	}
+	th := ui.CurrentTheme
+	W := float32(w.app.W)
+	c.FillRect(ui.R(W-112, 0, 112, 32), th.Bg)
+	c.Line(W-112, 0, W-112, 32, 1, th.Outline)
+	cy := float32(16)
+	c.Line(W-85, cy, W-73, cy, 1, th.Muted)
+	c.Line(W-54, cy-6, W-42, cy+6, 1, th.Muted)
+	c.Line(W-54, cy+6, W-42, cy-6, 1, th.Muted)
+}

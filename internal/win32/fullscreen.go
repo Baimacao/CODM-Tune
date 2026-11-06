@@ -40,6 +40,15 @@ func ToggleFullscreen() bool {
 		oy := int((float32(nh) - float32(w.app.H)*scale) / 2)
 		surf.Canvas.FillRect(ui.R(0, 0, float32(nw), float32(nh)), ui.CurrentTheme.Bg)
 		surf.Canvas.SetView(scale, ox, oy)
+		if w.gpu != nil {
+			// The swap chain has to track the new client size, otherwise the
+			// next Present stretches a stale buffer across the screen.
+			if err := w.gpu.Resize(nw, nh); err != nil {
+				w.dropGPU()
+			} else {
+				w.gpu.SetView(scale, ox, oy)
+			}
+		}
 		old := w.surface
 		w.surface = surf
 		old.Close()
@@ -56,6 +65,13 @@ func ToggleFullscreen() bool {
 	if err == nil {
 		ns.Canvas.FillRect(ui.R(0, 0, float32(ns.W), float32(ns.H)), ui.CurrentTheme.Bg)
 		ns.Canvas.SetView(w.baseScale, 0, 0)
+		if w.gpu != nil {
+			if err := w.gpu.Resize(ns.W, ns.H); err != nil {
+				w.dropGPU()
+			} else {
+				w.gpu.SetView(w.baseScale, 0, 0)
+			}
+		}
 		old := w.surface
 		w.surface = ns
 		old.Close()

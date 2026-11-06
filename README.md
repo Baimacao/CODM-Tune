@@ -1,5 +1,7 @@
 # CODM TUNE
 
+> v12.6：**界面改由 GPU 渲染** —— 此前每一帧都是 GDI+ 在 CPU 上软件光栅化，再经 DIB Section + `BitBlt` 送进窗口，全程没有 GPU 参与。本版新增 Direct2D + Direct3D 11 后端：D2D1 画到 DXGI 交换链上，光栅化和呈现都交给显卡。同一套绘制原语、同一个 `ui.Painter` 接口，实测每帧 **4.65 ms → 1.30 ms（约 3.6 倍）**。没有可用 D3D11 设备时自动退回 GDI+，`cmd/preview` 截图链路仍走软件路径，两者共用一份几何代码。
+>
 > v12.5：**修掉一个会主动降低游戏性能的默认值** —— v12.4 及更早版本默认开启自动内存回收，且允许在 CODM 运行时按 6 分钟间隔清空待机列表。待机列表里装的是刚流进来的贴图，清掉之后下一帧要重新读盘，表现正是「平均帧没掉、1% low 掉下去」。本版：自动回收改为**默认关闭**，并且**游戏运行时一律暂停**（旧配置一次性迁移为关闭，之后由用户自己决定）。同时新增四个可还原的文件系统 / 定时器项：NTFS 元数据缓存、长路径支持、恢复预读、全局定时器请求。全部默认关闭、保存原值、关掉即还原。
 >
 > v12.4：新增第 15 个分类「硬盘与文件系统」—— 卷容量、每块物理盘的实时读/写/IOPS/队列（PDH，2 秒一采）、碎片分析与 DEFRAG / TRIM（调用系统自带 `defrag.exe`，走 UAC）、以及游戏进程的 I/O 优先级提升（`NtSetInformationProcess` 的 `ProcessIoPriority`，退出即恢复）。全部写操作都先读原值再改，关掉即还原。
@@ -76,6 +78,19 @@
 - **全局定时器请求**（`Session Manager\kernel\GlobalTimerResolutionRequests=1`）：Win10 2004+ 让定时器精度请求全局生效，减少帧时间抖动。需重启。
 
 > 顺带说明为什么**没有**抄 RyTuneX 的两项：`useplatformclock true`（强制 HPET）和 `disabledynamictick yes`。这两条在 Win10 上是旧世代经验，实测经常更差；同样没收 IFEO `Debugger=taskkill.exe` 那套遥测劫持 —— 那会把系统搞脏。
+
+## 渲染（v12.6）
+
+界面走 **Direct2D + Direct3D 11**：D2D1 画到 DXGI 交换链，光栅化和呈现都在 GPU 上。此前是 GDI+ 在 CPU 上软件光栅化再 `BitBlt`，v12.3 把单帧压到 14 ms 已经是那条路的天花板。
+
+同一份绘制工作，两条路径各跑 60 帧（`cmd/gputest`，1100×700，12 行卡片）：
+
+| 后端 | 每帧 |
+| --- | --- |
+| GDI+（软件） | 4.65 ms |
+| D2D1 + D3D11 | 1.30 ms |
+
+没有可用 D3D11 设备时自动退回 GDI+；设备丢失（`DEVICE_REMOVED`）同样退回，不会黑屏。设 `CODMTUNE_NO_GPU=1` 可强制走软件路径。`cmd/preview` 的截图链路始终是软件后端，所以 `docs/assets/` 里的图生成方式没变。
 
 ## 安全边界
 

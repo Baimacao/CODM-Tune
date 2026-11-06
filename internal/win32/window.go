@@ -54,6 +54,7 @@ func SetIdleInterval(ms int) {
 type window struct {
 	hwnd       uintptr
 	surface    *Surface
+	gpu        *GpuSurface // non-nil when frames go through D3D11
 	app        *ui.App
 	last       time.Time
 	hidden     bool
@@ -151,6 +152,12 @@ func Run(title string, app *ui.App) error {
 	}
 
 	gWin = &window{hwnd: hwnd, surface: surf, app: app, last: time.Now(), scale: scale, baseScale: scale, viewScale: scale}
+	// Bring up the D3D11 path. A failure here is expected on machines with no
+	// usable driver: the software surface above is already valid, so the app
+	// simply keeps rendering through GDI+.
+	if err := gWin.attachGPU(); err != nil {
+		gpuErr = err.Error()
+	}
 	setDarkTitle(hwnd)
 	if icon := loadAppIcon(); icon != 0 {
 		pSendMessageW.Call(hwnd, 0x0080 /*WM_SETICON*/, 1 /*ICON_BIG*/, icon)
@@ -171,6 +178,8 @@ func Run(title string, app *ui.App) error {
 		pTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
+	gWin.dropGPU()
+	StopGPU()
 	return nil
 }
 
@@ -215,16 +224,65 @@ func (w *window) tick() {
 	if dt > 0.1 {
 		dt = 0.1
 	}
-	drew := w.app.Frame(w.surface.Canvas, dt)
-	if drew {
-		w.drawChrome()
-		w.present()
+	var drew bool
+	if w.gpu != nil {
+		// One BeginDraw/EndDraw per frame: the D2D context needs a target
+		// bound and a single batch, and Present must happen after EndDraw.
+		c := w.gpu.BeginCanvas(ui.CurrentTheme.Bg)
+		if c != nil {
+			drew = w.app.Frame(c, dt)
+			w.drawChromeGpu(c)
+			c.Close()
+			w.gpu.Canvas = nil
+			if drew {
+				if !w.gpu.Present() {
+					// Device lost: fall back to software for this run rather
+					// than presenting a black window forever.
+					w.dropGPU()
+				}
+			}
+		} else {
+			w.dropGPU()
+		}
+	} else {
+		drew = w.app.Frame(w.surface.Canvas, dt)
+		if drew {
+			w.drawChrome()
+			w.present()
+		}
 	}
 	if spring.Awake() == 0 && !drew {
 		w.setTimer(int(idleMS))
 	} else {
 		w.setTimer(int(frameMS))
 	}
+}
+
+// attachGPU brings up the D3D11 path for this window. Failure is not fatal:
+// the software surface stays and the app keeps drawing with GDI+.
+func (w *window) attachGPU() error {
+	if gpuDisabled() {
+		return fmt.Errorf("disabled by CODMTUNE_NO_GPU")
+	}
+	if err := LoadGPU(); err != nil {
+		return err
+	}
+	g, err := NewGpuSurface(w.hwnd, w.surface.W, w.surface.H)
+	if err != nil {
+		return err
+	}
+	g.SetScale(w.scale)
+	w.gpu = g
+	return nil
+}
+
+// dropGPU releases the swap chain and returns to the software surface.
+func (w *window) dropGPU() {
+	if w.gpu == nil {
+		return
+	}
+	w.gpu.Close()
+	w.gpu = nil
 }
 
 func (w *window) present() {

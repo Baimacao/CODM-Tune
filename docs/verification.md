@@ -1077,3 +1077,59 @@ build.cmd        ok → bin\codmtune.exe / bin\preview.exe
 - **VBS 未关**：本机 `VirtualizationBasedSecurityStatus=2`、`HypervisorPresent=True`，而 Xeon E3-1275 v3（Haswell）无 MBEC，VBS 靠模拟有实打实的开销。但关它要 `bcdedit /set hypervisorlaunchtype off` + 重启，且连带关掉 Hyper-V / WSL2 / Docker —— 影响面超出本工具，交用户决定，本轮不写。
 - **未做 A/B 数据**：本次修的是「已知会伤性能的默认值」，不是「证明某个开关提升帧率」。真正的因果验证要用户打一局前后对比，工具自带的帧率记录可以做，但不属于本次改动范围。
 - ACE 资源限制（Idle + 单核）仍在，默认关闭，但用户当前是开着的 —— 反作弊跑在 Idle 上会拖长完整性校验，这是第二个待验证项，同样需要实测数据，本轮不改默认。
+
+---
+
+## 82. v12.6：界面改由 Direct2D + D3D11 渲染
+
+### 82.1 起因
+
+用户指出「真正的问题在于没有 gpu 渲染」。核对代码属实：每帧路径是
+
+```
+GDI+ 软件光栅化 → CreateDIBSection → BitBlt → 窗口 DC
+```
+
+`internal/win32/ui_shim.cpp` 里 `Graphics` 直接绑在 HDC 上，全程无 GPU 参与。v12.3 曾把单帧从 58 ms 压到 14 ms，靠的是**减少软件工作量**（降合成质量、跳过重采样、烘焙不透明底图），天花板就在那里。
+
+### 82.2 做法
+
+新增 `internal/win32/ui_gpu.cpp`（约 590 行），与 `ui_shim.cpp` 编进同一个 DLL：
+
+- **设备**：`D3D11CreateDevice`（HARDWARE，失败退 WARP）→ `ID2D1Device` → `IDXGISwapChain1`（`FLIP_SEQUENTIAL`，失败退 `DISCARD`）。
+- **文字**：DWrite，`SetParagraphAlignment(CENTER)` + 省略号截断，对齐 GDI+ 的 `StringAlignmentCenter` 语义。
+- **图片**：WIC 解码到 `ID2D1Bitmap`，按路径缓存 8 张，与 GDI+ 侧一致。
+- **几何**：`roundPath` 用 `ID2D1PathGeometry` 重画圆角矩形，参数（含 `stroke_round` 的 `inset = width/2`）逐条对齐原实现。
+
+Go 侧新增 `internal/win32/gpu.go`：`LoadGPU` / `GpuSurface` / `GpuCanvas`，`GpuCanvas` 实现 `ui.Painter`。**`ui_shim.cpp` 与 `ui.Painter` 接口均未改动**——换的是接口下面的实现，不是接口本身。
+
+`window.tick()` 在 `w.gpu != nil` 时走 GPU 分支：每帧 `BeginCanvas`（BeginDraw + Clear）→ `app.Frame` → `drawChromeGpu` → `Close`（EndDraw）→ `Present`。`drawChromeGpu` 与 `drawChrome` 是同一份几何，两个后端不会漂移。
+
+### 82.3 三个必须处理的坑
+
+1. **COM 未初始化**：`CoCreateInstance(CLSID_WICImagingFactory)` 首次返回码 6（`CO_E_NOTINITIALIZED`）。在 `gtg_init` 开头加 `CoInitializeEx(COINIT_APARTMENTTHREADED)`，容忍 `RPC_E_CHANGED_MODE`。
+2. **颜色发紫**：`toColor` 最初按预乘 alpha 写（`r*a`），而 `D2D1_COLOR_F` 不是预乘——brush 自己会乘。半透明色被乘了两次，`Primary` 从红偏成紫。去掉预乘后正常。
+3. **每帧一次 BeginDraw/EndDraw**：D2D 的 device context 不能像 GDI+ 那样长期持有 canvas，`GpuSurface.BeginCanvas` 每帧新建、`Close` 结束，view 变换（`SetView`/`SetScale`）在每帧开头重新施加。
+
+### 82.4 实测
+
+`cmd/gputest` 用同一份绘制工作（12 行卡片：圆角填充、描边、圆、两段文字、分隔线）分别测两条路径，各跑 60 帧：
+
+```
+software     4.65 ms/frame
+gpu          1.30 ms/frame
+```
+
+约 **3.6 倍**。本机 RX 580 + Xeon E3-1275 v3。
+
+### 82.5 回退与共存
+
+- 无可用 D3D11 设备、或 `CODMTUNE_NO_GPU=1`、或 `Present` 返回 `DEVICE_REMOVED`/`DEVICE_RESET` 时，`dropGPU()` 释放交换链并回到软件路径，应用继续运行（不是崩溃、不是黑屏）。
+- `cmd/preview` 不调用 `LoadGPU`，截图链路仍走 GDI+，`docs/assets/*.png` 的生成方式不变。
+- 全屏切换时 `GpuSurface.Resize` 跟随客户区尺寸，失败则退回软件路径。
+
+### 82.6 边界
+
+- 未做：D2D 的 `Effects`（模糊/投影/渐变）尚未接线。渲染器现在具备这个能力，但 `ui.Painter` 还没有对应的绘制方法——这是下一步的事，不在本次范围。
+- 未做：多显示器 DPI 变化时的自动重建（沿用原有的 `SetView` 缩放路径）。
+- 未做：HUD 与准心子窗口仍走 GDI+。它们是独立的透明分层窗口，DXGI 交换链与 `WS_EX_LAYERED` 不兼容，需要换成 `DComposition` 或 `UpdateLayeredWindow` 的 GPU 变体，属于另一轮工作。

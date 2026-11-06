@@ -7,9 +7,9 @@ if errorlevel 1 (
   exit /b 1
 )
 cd /d "%~dp0"
-cl /nologo /LD /O2 /EHsc /MT /DUNICODE /D_UNICODE ui_shim.cpp ^
+cl /nologo /LD /O2 /EHsc /MT /DUNICODE /D_UNICODE ui_shim.cpp ui_gpu.cpp ^
    /Fe:codmtune_ui.dll ^
-   /link gdiplus.lib user32.lib gdi32.lib
+   /link gdiplus.lib user32.lib gdi32.lib d2d1.lib d3d11.lib dxgi.lib dwrite.lib windowscodecs.lib ole32.lib
 if errorlevel 1 exit /b 1
-del /q ui_shim.obj 2>nul
+del /q ui_shim.obj ui_gpu.obj 2>nul
 echo built codmtune_ui.dll
