@@ -106,4 +106,19 @@ type Painter interface {
 	DrawImageSolid(path string, r Rect, alpha uint8) bool
 	PushClip(r Rect)
 	PopClip()
+
+	// --- effects -----------------------------------------------------
+	// These three exist because the renderer is now on the GPU: a gradient or
+	// a soft shadow costs almost nothing there, where on the old CPU path each
+	// one would have been another full-surface blend. Only the standard style
+	// uses them; the industrial and endfield families are deliberately flat.
+	//
+	// FillLinearGradient paints a two-stop gradient across r. vertical picks
+	// top-to-bottom over left-to-right.
+	FillLinearGradient(r Rect, from, to Color, vertical bool)
+	// FillRadialGradient fills the ellipse inscribed in r, bright at the centre.
+	FillRadialGradient(r Rect, center, edge Color)
+	// FillShadow draws a soft drop shadow behind r. blur is the spread in
+	// pixels; c carries the shadow colour and its peak alpha.
+	FillShadow(r Rect, radius, blur float32, c Color)
 }

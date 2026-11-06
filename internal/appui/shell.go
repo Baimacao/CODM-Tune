@@ -74,7 +74,7 @@ func (s *screens) rail(root *ui.Node) {
 			drawLogo(c, ui.R(16, 18, 30, 26), th.Primary)
 		}
 		name := "CODM TUNE"
-		sub := "MD3E · v12.6"
+		sub := "MD3E · v12.7"
 		if th.Industrial() {
 			name = "CODM//TUNE"
 			sub = fmt.Sprintf("ARMORY SYSTEM / %02d", len(navItems))

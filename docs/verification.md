@@ -1133,3 +1133,71 @@ gpu          1.30 ms/frame
 - 未做：D2D 的 `Effects`（模糊/投影/渐变）尚未接线。渲染器现在具备这个能力，但 `ui.Painter` 还没有对应的绘制方法——这是下一步的事，不在本次范围。
 - 未做：多显示器 DPI 变化时的自动重建（沿用原有的 `SetView` 缩放路径）。
 - 未做：HUD 与准心子窗口仍走 GDI+。它们是独立的透明分层窗口，DXGI 交换链与 `WS_EX_LAYERED` 不兼容，需要换成 `DComposition` 或 `UpdateLayeredWindow` 的 GPU 变体，属于另一轮工作。
+
+---
+
+## 83. v12.7：渲染器 Effects（渐变 / 径向 / 投影）
+
+### 83.1 做了什么
+
+`ui.Painter` 新增三个方法，两个后端各自实现：
+
+| 方法 | GPU（D2D1） | 软件（GDI+） |
+| --- | --- | --- |
+| `FillLinearGradient` | 缓存 brush + 单位方块变换 | `LinearGradientBrush` |
+| `FillRadialGradient` | `ID2D1RadialGradientBrush` | `PathGradientBrush` |
+| `FillShadow` | 按尺寸烘焙位图，单次 `DrawBitmap` | 堆叠 6 圈圆角矩形 |
+
+只有 `standard`（MD3E）风格使用它们。`ark` 和 `endfield` 在 `card()` 里提前 return，它们是扁平钢板，加投影就成了另一个产品。
+
+### 83.2 两次性能回退，都靠实测抓出来
+
+**第一次**：阴影用堆叠圆角矩形实现（12 层，逐层降 alpha）。实测：
+
+```
+software   5.90 ms/frame
+gpu        6.03 ms/frame   ← 比软件还慢
+```
+
+原因：每层都是一个新建的 `ID2D1PathGeometry` + brush，12 张卡片 × 12 层 = 每帧 144 次设备分配。
+
+**改成 9-slice 之后**：3.60 ms。还是不够——每张卡片 9 次 `DrawBitmap`，12 张 = 108 次。
+
+**最终方案**：按 `(w, h, blur)` 烘焙整块阴影位图，缓存上限 8 个尺寸，每张卡片**一次** `DrawBitmap`。
+
+**第二次**：渐变每帧新建 `ID2D1GradientStopCollection` + `ID2D1LinearGradientBrush`，跟阴影是同一类错误。改成按 `(c1, c2, vertical)` 缓存 brush，几何归一化到单位方块，用 `SetTransform` 映射到目标矩形——一个 brush 服务所有尺寸。
+
+**最终实测**（同一份工作：12 行卡片 + 渐变 + 阴影，各 60 帧）：
+
+```
+software   5.60 ms/frame
+gpu        1.19 ms/frame
+```
+
+比 v12.6 的纯色 1.30 ms 还快，因为渐变和阴影现在都是缓存命中。
+
+### 83.3 软件路径也画阴影
+
+最初 `Canvas.FillShadow` 是空实现，理由是软件堆叠要 ~3 ms/卡片。但那会让 `cmd/preview` 生成的 `docs/assets/*.png` 与实际运行画面**不一致**——截图里没有阴影，用户看到的有。现在软件路径用 6 圈堆叠实现同一效果，慢一点，但预览可信。这条路径只在 `cmd/preview` 和无 D3D11 设备时跑。
+
+### 83.4 资源生命周期
+
+- `gtg_shutdown` 的释放顺序：`g_shadow.bmp` → `g_shadowBaked` → `g_gradients` → `g_brushes` → `g_texts` → `g_images` → DWrite → WIC → D2D device → factory → DXGI → D3D。所有位图和 brush 都持有 device 引用，必须在 device 之前释放。
+- 曾漏掉 `g_shadowBaked.clear()`，退出时崩溃（`0xc0000005`）。补上后干净退出。
+
+### 83.5 验证
+
+```
+go build ./...   ok
+go vet ./...     0
+go test ./...    全 ok
+gofmt -l         空
+build.cmd        ok
+```
+
+三套风格各渲染一遍（`bin\preview.exe -style standard|ark|endfield -all`），standard 17 张定格，ark / endfield 无回归。截图 `docs/assets/standard-cards.png`。
+
+### 83.6 边界
+
+- `FillRadialGradient` 已实现但**当前 UI 没有调用点**——留给后续的焦点光晕。没有调用点意味着它没有被真实场景验证过，只跑过编译。
+- 阴影的 `rad` 参数在 GPU 路径被忽略：烘焙位图用的是固定 12 px 圆角（`bakedShadow` 里 `float rad = 12.0f`），因为卡片的圆角在 `card()` 里恒为 `th.CardRadius`。如果将来出现不同圆角的卡片，缓存键要把 `rad` 也加进去。

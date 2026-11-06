@@ -394,7 +394,61 @@ __declspec(dllexport) void gt_glyph(void* p, const WCHAR* s, int x, int y, int w
     c->g->DrawString(s, -1, &f, rc, &fmt, b);
 }
 
-__declspec(dllexport) int gt_version(void) { return 4; }
+// gt_fill_linear paints a two-stop gradient across a rect. vertical=1 runs
+// top-to-bottom, otherwise left-to-right. GDI+ has a LinearGradientBrush; this
+// exists so the standard style can carry a soft surface without a bitmap.
+__declspec(dllexport) void gt_fill_linear(void* p, int x, int y, int w, int h, unsigned c1,
+                                          unsigned c2, int vertical) {
+    Canvas* c = (Canvas*)p;
+    if (!c || w <= 0 || h <= 0) return;
+    PointF a((REAL)x, (REAL)y);
+    PointF b = vertical ? PointF((REAL)x, (REAL)(y + h)) : PointF((REAL)(x + w), (REAL)y);
+    LinearGradientBrush br(a, b, Color(c1), Color(c2));
+    c->g->FillRectangle(&br, x, y, w, h);
+}
+
+// gt_fill_radial paints a centre-out gradient inside a rect (ellipse clipped to
+// the box). Used for the focus glow and for elevated surfaces.
+__declspec(dllexport) void gt_fill_radial(void* p, int x, int y, int w, int h, unsigned center,
+                                          unsigned edge) {
+    Canvas* c = (Canvas*)p;
+    if (!c || w <= 0 || h <= 0) return;
+    GraphicsPath path;
+    path.AddEllipse((REAL)x, (REAL)y, (REAL)w, (REAL)h);
+    PathGradientBrush br(&path);
+    br.SetCenterColor(Color(center));
+    int n = 1;
+    br.SetSurroundColors(&Color(edge), &n);
+    c->g->FillPath(&br, &path);
+}
+
+// gt_shadow draws a soft drop shadow by stacking rounded rects with falling
+// alpha. The D2D backend bakes the shadow into a bitmap instead, which is why
+// this exists only for the software path (cmd/preview and the no-GPU fallback).
+// It is slower by design: keeping the preview honest matters more than the
+// frame cost of a path that only runs when there is no usable D3D11 device.
+__declspec(dllexport) void gt_shadow(void* p, int x, int y, int w, int h, int rad, int blur,
+                                     unsigned argb) {
+    Canvas* c = (Canvas*)p;
+    if (!c || w <= 0 || h <= 0 || blur <= 0) return;
+    int a0 = (argb >> 24) & 0xFF;
+    if (a0 == 0) return;
+    unsigned rgb = argb & 0x00FFFFFF;
+    const int rings = 6;
+    for (int i = rings; i >= 1; i--) {
+        float t = (float)i / (float)rings;
+        int a = (int)(a0 * (1.0f - t) * (1.0f - t) / rings * 2.0f);
+        if (a <= 0) continue;
+        int grow = (int)((float)blur * t);
+        GraphicsPath path;
+        make_round_path(&path, (REAL)(x - grow), (REAL)(y - grow + 1),
+                        (REAL)(w + grow * 2), (REAL)(h + grow * 2), (REAL)(rad + grow));
+        SolidBrush br(Color(((unsigned)a << 24) | rgb));
+        c->g->FillPath(&br, &path);
+    }
+}
+
+__declspec(dllexport) int gt_version(void) { return 5; }
 
 __declspec(dllexport) int gt_set_font_family(const WCHAR* name) {
     if (!g_started || !name) return 1;

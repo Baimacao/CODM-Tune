@@ -39,6 +39,9 @@ type shimProcs struct {
 	glyph        *syscall.LazyProc
 	scale        *syscall.LazyProc
 	view         *syscall.LazyProc
+	fillLinear   *syscall.LazyProc
+	fillRadial   *syscall.LazyProc
+	shadow       *syscall.LazyProc
 }
 
 var shim *shimProcs
@@ -76,6 +79,9 @@ func LoadUI() error {
 		glyph:        dll.NewProc("gt_glyph"),
 		scale:        dll.NewProc("gt_set_scale"),
 		view:         dll.NewProc("gt_set_view"),
+		fillLinear:   dll.NewProc("gt_fill_linear"),
+		fillRadial:   dll.NewProc("gt_fill_radial"),
+		shadow:       dll.NewProc("gt_shadow"),
 	}
 	if r, _, e := s.init.Call(); r != 0 {
 		return fmt.Errorf("gt_init failed: %v", e)
@@ -360,6 +366,52 @@ func (c *Canvas) DrawImage(path string, r ui.Rect, alpha uint8) bool {
 	shim.drawImage.Call(c.G, uintptr(unsafe.Pointer(p)),
 		uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)), uintptr(i32(r.H)), uintptr(alpha))
 	return true
+}
+
+// FillLinearGradient paints a two-stop gradient. GDI+ does this in software,
+// which is why the effects only appear in the standard style: on this path a
+// full-card gradient is a real per-pixel cost, on the D2D path it is free.
+func (c *Canvas) FillLinearGradient(r ui.Rect, from, to ui.Color, vertical bool) {
+	if c.G == 0 || r.Empty() {
+		return
+	}
+	if shim == nil || shim.fillLinear.Find() != nil {
+		c.FillRect(r, from)
+		return
+	}
+	v := uintptr(0)
+	if vertical {
+		v = 1
+	}
+	shim.fillLinear.Call(c.G, uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)),
+		uintptr(i32(r.H)), uintptr(uint32(from)), uintptr(uint32(to)), v)
+}
+
+func (c *Canvas) FillRadialGradient(r ui.Rect, center, edge ui.Color) {
+	if c.G == 0 || r.Empty() {
+		return
+	}
+	if shim == nil || shim.fillRadial.Find() != nil {
+		c.FillRect(r, center)
+		return
+	}
+	shim.fillRadial.Call(c.G, uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)),
+		uintptr(i32(r.H)), uintptr(uint32(center)), uintptr(uint32(edge)))
+}
+
+// FillShadow draws the same soft shadow the GPU path bakes, by stacking rings.
+// It is the slower implementation on purpose: this path runs for cmd/preview
+// (so the committed screenshots show what users actually see) and as the
+// no-D3D11 fallback, where correctness matters more than frame cost.
+func (c *Canvas) FillShadow(r ui.Rect, radius, blur float32, col ui.Color) {
+	if c.G == 0 || r.Empty() || blur <= 0 {
+		return
+	}
+	if shim == nil || shim.shadow.Find() != nil {
+		return
+	}
+	shim.shadow.Call(c.G, uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)),
+		uintptr(i32(r.H)), uintptr(i32(radius)), uintptr(i32(blur)), uintptr(uint32(col)))
 }
 
 func fileExists(path string) bool {

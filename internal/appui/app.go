@@ -230,6 +230,19 @@ func card(c ui.Painter, r ui.Rect, press float32, fill ui.Color) {
 	if rad < 6 {
 		rad = 6
 	}
+	// Soft shadow and a vertical gradient on the standard family only. Both
+	// are effects the GPU path draws for free and the software path either
+	// fakes cheaply (gradient) or skips (shadow, ~3 ms/card). The industrial
+	// and endfield families return above: they are flat plates by design, and
+	// adding depth there would be a different product.
+	if th.Style == "standard" && press < 0.5 {
+		c.FillShadow(rr, rad, 14, th.Bg.WithAlpha(90))
+	}
+	if th.Style == "standard" {
+		c.FillLinearGradient(rr, th.Surface, th.Surface2, true)
+		c.StrokeRoundRect(rr, rad, 1, th.Outline)
+		return
+	}
 	c.FillRoundRect(rr, rad, fill)
 	c.StrokeRoundRect(rr, rad, 1, th.Outline)
 }

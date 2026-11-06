@@ -45,7 +45,9 @@ func main() {
 		c.FillRect(ui.R(0, 0, w, h), th.Bg)
 		for i := 0; i < 12; i++ {
 			y := float32(40 + i*52)
-			c.FillRoundRect(ui.R(24, y, w-48, 44), 12, th.Surface)
+			// Match what a real card does: shadow, then a gradient fill.
+			c.FillShadow(ui.R(24, y, w-48, 44), 12, 14, th.Bg.WithAlpha(90))
+			c.FillLinearGradient(ui.R(24, y, w-48, 44), th.Surface, th.Surface2, true)
 			c.StrokeRoundRect(ui.R(24, y, w-48, 44), 12, 1, th.Outline)
 			c.Circle(52, y+22, 10, th.Primary)
 			c.Text(ui.R(76, y+10, 300, 22), "CODM TUNE 帧时间测量", 13, th.Text, ui.AlignLeft, true)

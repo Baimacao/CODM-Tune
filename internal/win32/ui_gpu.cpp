@@ -224,6 +224,223 @@ bool bindTarget(GpuSurface* s) {
     return true;
 }
 
+// gtg_shadow: a drop shadow drawn from a cached 9-slice bitmap.
+//
+// The first version stacked a dozen offset rounded rects with falling alpha.
+// That measured at 6.03 ms/frame against 5.90 ms for the software path -- each
+// rect meant a fresh path geometry plus a brush, which is far more work than
+// the thing it was trying to avoid. A shadow does not change shape, only size,
+// so it is rasterised once into a small bitmap and then nine-slice stretched.
+//
+// The bitmap is generated on the CPU: for each pixel, the signed distance to
+// the rounded-rect edge decides the alpha, which gives a real soft falloff
+// without a blur pass.
+struct ShadowCache {
+    ComPtr<ID2D1Bitmap> bmp;
+    int tile = 0;   // half-size of the cached tile
+    int inset = 0;  // corner region that must not be stretched
+    int blur = 0;
+};
+ShadowCache g_shadow;
+
+// distanceToRoundRect returns the signed distance from (px,py) to the edge of a
+// rounded rect of size (w,h) with corner radius r; negative means inside.
+float distanceToRoundRect(float px, float py, float w, float h, float r) {
+    float cx = w / 2.0f, cy = h / 2.0f;
+    float qx = fabsf(px - cx) - (cx - r);
+    float qy = fabsf(py - cy) - (cy - r);
+    float ax = qx > 0 ? qx : 0.0f;
+    float ay = qy > 0 ? qy : 0.0f;
+    float outside = sqrtf(ax * ax + ay * ay);
+    float inside = fminf(fmaxf(qx, qy), 0.0f);
+    return outside + inside - r;
+}
+
+bool buildShadow(GpuCanvas* c, int blur, unsigned argb) {
+    if (!c || !c->surf || !c->surf->ctx) return false;
+    int inset = blur * 2;
+    int tile = inset + 8;
+    int side = tile * 2;
+    if (side <= 0 || side > 512) return false;
+
+    // BGRA premultiplied, matching DXGI_FORMAT_B8G8R8A8_UNORM + PREMULTIPLIED.
+    std::vector<unsigned> px((size_t)side * side);
+    float peak = ((argb >> 24) & 0xFF) / 255.0f;
+    float sr = ((argb >> 16) & 0xFF) / 255.0f;
+    float sg = ((argb >> 8) & 0xFF) / 255.0f;
+    float sb = (argb & 0xFF) / 255.0f;
+    float r = 12.0f;
+    for (int y = 0; y < side; y++) {
+        for (int x = 0; x < side; x++) {
+            float d = distanceToRoundRect(x + 0.5f, y + 0.5f, (float)side, (float)side, r);
+            // Inside the shape the shadow is at full strength; outside it falls
+            // off over `blur` pixels with a quadratic curve.
+            float a = 0.0f;
+            if (d <= 0) {
+                a = peak;
+            } else if (d < (float)blur) {
+                float t = 1.0f - d / (float)blur;
+                a = peak * t * t;
+            }
+            unsigned alpha = (unsigned)(a * 255.0f + 0.5f);
+            if (alpha == 0) {
+                px[(size_t)y * side + x] = 0;
+                continue;
+            }
+            unsigned ba = (unsigned)(sb * alpha + 0.5f);
+            unsigned ga = (unsigned)(sg * alpha + 0.5f);
+            unsigned ra = (unsigned)(sr * alpha + 0.5f);
+            px[(size_t)y * side + x] = (alpha << 24) | (ra << 16) | (ga << 8) | ba;
+        }
+    }
+
+    D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    ComPtr<ID2D1Bitmap> bmp;
+    if (FAILED(c->surf->ctx->CreateBitmap(
+            D2D1::SizeU(side, side), px.data(), (UINT32)(side * 4), props, &bmp)))
+        return false;
+    g_shadow.bmp = bmp;
+    g_shadow.tile = tile;
+    g_shadow.inset = inset;
+    g_shadow.blur = blur;
+    return true;
+}
+
+// The 9-slice version measured 3.60 ms/frame: nine DrawBitmap calls per card,
+// 108 per frame for twelve cards. Card sizes are few and fixed, so the whole
+// shadow is baked once per (w,h) and blitted with a single call.
+struct ShadowBaked {
+    int w, h, blur;
+    ComPtr<ID2D1Bitmap> bmp;
+};
+std::vector<ShadowBaked> g_shadowBaked;
+
+ID2D1Bitmap* bakedShadow(GpuCanvas* c, int w, int h, int blur, unsigned argb) {
+    for (auto& e : g_shadowBaked)
+        if (e.w == w && e.h == h && e.blur == blur) return e.bmp.Get();
+    if (!c || !c->surf || !c->surf->ctx) return nullptr;
+
+    int inset = blur * 2;
+    int sw = w + inset * 2;
+    int sh = h + inset * 2;
+    if (sw <= 0 || sh <= 0 || sw > 2048 || sh > 2048) return nullptr;
+
+    std::vector<unsigned> px((size_t)sw * sh);
+    float peak = ((argb >> 24) & 0xFF) / 255.0f;
+    float sr = ((argb >> 16) & 0xFF) / 255.0f;
+    float sg = ((argb >> 8) & 0xFF) / 255.0f;
+    float sb = (argb & 0xFF) / 255.0f;
+    float rad = 12.0f;
+    for (int y = 0; y < sh; y++) {
+        for (int x = 0; x < sw; x++) {
+            float d = distanceToRoundRect((float)x + 0.5f, (float)y + 0.5f, (float)sw,
+                                          (float)sh, rad);
+            float a = 0.0f;
+            if (d <= 0) {
+                a = peak;
+            } else if (d < (float)blur) {
+                float t = 1.0f - d / (float)blur;
+                a = peak * t * t;
+            }
+            unsigned alpha = (unsigned)(a * 255.0f + 0.5f);
+            if (alpha == 0) {
+                px[(size_t)y * sw + x] = 0;
+                continue;
+            }
+            unsigned ba = (unsigned)(sb * alpha + 0.5f);
+            unsigned ga = (unsigned)(sg * alpha + 0.5f);
+            unsigned ra = (unsigned)(sr * alpha + 0.5f);
+            px[(size_t)y * sw + x] = (alpha << 24) | (ra << 16) | (ga << 8) | ba;
+        }
+    }
+    D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    ComPtr<ID2D1Bitmap> bmp;
+    if (FAILED(c->surf->ctx->CreateBitmap(D2D1::SizeU((UINT32)sw, (UINT32)sh), px.data(),
+                                          (UINT32)(sw * 4), props, &bmp)))
+        return nullptr;
+    // Card sizes are a handful; cap the cache so a resized window cannot grow
+    // it without bound.
+    if (g_shadowBaked.size() >= 8) g_shadowBaked.erase(g_shadowBaked.begin());
+    ShadowBaked rec;
+    rec.w = w;
+    rec.h = h;
+    rec.blur = blur;
+    rec.bmp = bmp;
+    g_shadowBaked.push_back(rec);
+    return g_shadowBaked.back().bmp.Get();
+}
+
+// drawNineSlice stretches the cached tile to r while keeping the corners 1:1.
+void drawNineSlice(GpuCanvas* c, const D2D1_RECT_F& r, float opacity) {
+    ID2D1Bitmap* b = g_shadow.bmp.Get();
+    if (!b) return;
+    float side = (float)(g_shadow.tile * 2);
+    float ins = (float)g_shadow.inset;
+    float cw = r.right - r.left;
+    float ch = r.bottom - r.top;
+    if (cw <= 0 || ch <= 0) return;
+
+    // Horizontal and vertical bands: [0..ins], [ins..side-ins], [side-ins..side]
+    float sx[4] = {0, ins, side - ins, side};
+    float sy[4] = {0, ins, side - ins, side};
+    float dx[4] = {r.left, r.left + ins, r.right - ins, r.right};
+    float dy[4] = {r.top, r.top + ins, r.bottom - ins, r.bottom};
+
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            D2D1_RECT_F src = D2D1::RectF(sx[i], sy[j], sx[i + 1], sy[j + 1]);
+            D2D1_RECT_F dst = D2D1::RectF(dx[i], dy[j], dx[i + 1], dy[j + 1]);
+            if (dst.right - dst.left <= 0 || dst.bottom - dst.top <= 0) continue;
+            c->surf->ctx->DrawBitmap(b, &dst, opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                     &src);
+        }
+    }
+}
+
+
+// Gradient brushes are cached by colour pair. Creating a stop collection and a
+// brush per card per frame was the same mistake the shadow made: the UI draws
+// the same two or three gradients hundreds of times, and each creation is a
+// device allocation. The brush geometry is normalised to a unit square and the
+// transform is set per call instead, so one brush serves every size.
+struct GradientRec {
+    unsigned c1, c2;
+    bool vertical;
+    ComPtr<ID2D1LinearGradientBrush> brush;
+};
+std::vector<GradientRec> g_gradients;
+
+ID2D1LinearGradientBrush* getGradient(GpuCanvas* c, unsigned c1, unsigned c2, bool vertical) {
+    if (!c || !c->surf || !c->surf->ctx) return nullptr;
+    for (auto& e : g_gradients)
+        if (e.c1 == c1 && e.c2 == c2 && e.vertical == vertical) return e.brush.Get();
+
+    ComPtr<ID2D1GradientStopCollection> stops;
+    D2D1_GRADIENT_STOP gs[2];
+    gs[0].position = 0.0f;
+    gs[0].color = toColor(c1);
+    gs[1].position = 1.0f;
+    gs[1].color = toColor(c2);
+    if (FAILED(c->surf->ctx->CreateGradientStopCollection(gs, 2, &stops))) return nullptr;
+    // Unit-space endpoints; the caller scales the brush to the rect.
+    D2D1_POINT_2F a = D2D1::Point2F(0, 0);
+    D2D1_POINT_2F b = vertical ? D2D1::Point2F(0, 1) : D2D1::Point2F(1, 0);
+    ComPtr<ID2D1LinearGradientBrush> br;
+    if (FAILED(c->surf->ctx->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(a, b), stops.Get(), &br)))
+        return nullptr;
+    if (g_gradients.size() >= 16) g_gradients.erase(g_gradients.begin());
+    GradientRec rec;
+    rec.c1 = c1;
+    rec.c2 = c2;
+    rec.vertical = vertical;
+    rec.brush = br;
+    g_gradients.push_back(rec);
+    return g_gradients.back().brush.Get();
+}
+
 } // namespace
 
 extern "C" {
@@ -287,6 +504,11 @@ __declspec(dllexport) int gtg_init(void) {
 }
 
 __declspec(dllexport) void gtg_shutdown(void) {
+    // Order matters: every bitmap and brush holds a reference to the device
+    // context, so they must all go before the device itself.
+    g_shadow.bmp.Reset();
+    g_shadowBaked.clear();
+    g_gradients.clear();
     g_brushes.clear();
     g_texts.clear();
     g_images.clear();
@@ -575,6 +797,68 @@ __declspec(dllexport) void gtg_image_size(const WCHAR* path, int* w, int* h) {
     frame->GetSize(&iw, &ih);
     if (w) *w = (int)iw;
     if (h) *h = (int)ih;
+}
+
+// gtg_fill_linear: two-stop gradient, vertical=1 runs top-to-bottom.
+__declspec(dllexport) void gtg_fill_linear(void* p, int x, int y, int w, int h, unsigned c1,
+                                           unsigned c2, int vertical) {
+    GpuCanvas* c = (GpuCanvas*)p;
+    if (!c || w <= 0 || h <= 0) return;
+    ID2D1LinearGradientBrush* br = getGradient(c, c1, c2, vertical != 0);
+    if (!br) return;
+    // Map the unit square onto the target rect.
+    D2D1_MATRIX_3X2_F saved;
+    c->surf->ctx->GetTransform(&saved);
+    D2D1_MATRIX_3X2_F place = D2D1::Matrix3x2F::Scale((FLOAT)w, (FLOAT)h) *
+                             D2D1::Matrix3x2F::Translation((FLOAT)x, (FLOAT)y);
+    c->surf->ctx->SetTransform(place * saved);
+    c->surf->ctx->FillRectangle(D2D1::RectF(0, 0, 1, 1), br);
+    c->surf->ctx->SetTransform(saved);
+}
+
+// gtg_fill_radial: centre-out gradient filling an ellipse inscribed in the rect.
+__declspec(dllexport) void gtg_fill_radial(void* p, int x, int y, int w, int h, unsigned center,
+                                           unsigned edge) {
+    GpuCanvas* c = (GpuCanvas*)p;
+    if (!c || w <= 0 || h <= 0) return;
+    ComPtr<ID2D1GradientStopCollection> stops;
+    D2D1_GRADIENT_STOP gs[2];
+    gs[0].position = 0.0f;
+    gs[0].color = toColor(center);
+    gs[1].position = 1.0f;
+    gs[1].color = toColor(edge);
+    if (FAILED(c->surf->ctx->CreateGradientStopCollection(gs, 2, &stops))) return;
+    ComPtr<ID2D1RadialGradientBrush> br;
+    if (FAILED(c->surf->ctx->CreateRadialGradientBrush(
+            D2D1::RadialGradientBrushProperties(
+                D2D1::Point2F(x + w / 2.0f, y + h / 2.0f), D2D1::Point2F(0, 0),
+                w / 2.0f, h / 2.0f),
+            stops.Get(), &br)))
+        return;
+    c->surf->ctx->FillEllipse(
+        D2D1::Ellipse(D2D1::Point2F(x + w / 2.0f, y + h / 2.0f), w / 2.0f, h / 2.0f), br.Get());
+}
+
+__declspec(dllexport) void gtg_shadow(void* p, int x, int y, int w, int h, int rad, int blur,
+                                     unsigned argb) {
+    GpuCanvas* c = (GpuCanvas*)p;
+    if (!c || w <= 0 || h <= 0 || blur <= 0) return;
+    if (ID2D1Bitmap* b = bakedShadow(c, w, h, blur, argb)) {
+        int inset = blur * 2;
+        // One pixel low so the light reads as coming from above.
+        D2D1_RECT_F dst = D2D1::RectF((FLOAT)(x - inset), (FLOAT)(y - inset + 1),
+                                      (FLOAT)(x + w + inset), (FLOAT)(y + h + inset + 1));
+        c->surf->ctx->DrawBitmap(b, &dst, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        return;
+    }
+    if (!g_shadow.bmp || g_shadow.blur != blur) {
+        if (!buildShadow(c, blur, argb)) return;
+    }
+    // The shadow sits one pixel low so the light reads as coming from above.
+    D2D1_RECT_F r = D2D1::RectF((FLOAT)(x - g_shadow.inset), (FLOAT)(y - g_shadow.inset + 1),
+                                (FLOAT)(x + w + g_shadow.inset),
+                                (FLOAT)(y + h + g_shadow.inset + 1));
+    drawNineSlice(c, r, 1.0f);
 }
 
 __declspec(dllexport) int gtg_draw_image(void* p, const WCHAR* path, int x, int y, int w, int h,

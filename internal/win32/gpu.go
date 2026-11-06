@@ -38,6 +38,9 @@ type gpuProcs struct {
 	drawImage   *syscall.LazyProc
 	scale       *syscall.LazyProc
 	view        *syscall.LazyProc
+	fillLinear  *syscall.LazyProc
+	fillRadial  *syscall.LazyProc
+	shadow      *syscall.LazyProc
 }
 
 var (
@@ -45,6 +48,10 @@ var (
 	gpuOK    atomic.Bool
 	gpuErr   string
 	gpuInUse atomic.Bool
+	// gpuDead marks a device that was lost (DEVICE_REMOVED / DEVICE_RESET).
+	// The globals still point at it, so the next LoadGPU must tear them down
+	// instead of reusing them.
+	gpuDead atomic.Bool
 )
 
 // gpuDisabled lets a user bypass the GPU path (CODMTUNE_NO_GPU=1) when a
@@ -54,12 +61,25 @@ func gpuDisabled() bool { return os.Getenv("CODMTUNE_NO_GPU") == "1" }
 // LoadGPU tries to bring up the Direct2D backend. It returns an error instead
 // of failing the process: a machine without a usable D3D11 device keeps the
 // GDI+ path and the app still runs.
+//
+// A cached gpuErr is only reused while the device is still believed alive. After
+// a device loss the global state holds a dead ID2D1Device, so retrying has to
+// tear it down and build a fresh one rather than hand back the stale pointer.
 func LoadGPU() error {
 	if gpuOK.Load() {
 		return nil
 	}
 	if gpuErr != "" {
-		return fmt.Errorf("%s", gpuErr)
+		if !gpuDead.Load() {
+			return fmt.Errorf("%s", gpuErr)
+		}
+		// A previous device was lost: drop every reference before retrying.
+		if gpu != nil {
+			gpu.shutdown.Call()
+			gpu = nil
+		}
+		gpuErr = ""
+		gpuDead.Store(false)
 	}
 	if shim == nil {
 		return fmt.Errorf("shim not loaded")
@@ -90,6 +110,9 @@ func LoadGPU() error {
 		drawImage:   dll.NewProc("gtg_draw_image"),
 		scale:       dll.NewProc("gtg_set_scale"),
 		view:        dll.NewProc("gtg_set_view"),
+		fillLinear:  dll.NewProc("gtg_fill_linear"),
+		fillRadial:  dll.NewProc("gtg_fill_radial"),
+		shadow:      dll.NewProc("gtg_shadow"),
 	}
 	// Resolve before calling: a missing export would panic inside Call.
 	for _, pr := range []*syscall.LazyProc{
@@ -102,6 +125,11 @@ func LoadGPU() error {
 			gpuErr = "gpu exports missing: " + err.Error()
 			return fmt.Errorf("%s", gpuErr)
 		}
+	}
+	// Effects are additive: a DLL built before v12.7 simply does not have
+	// them, and the painter falls back to a flat fill.
+	for _, pr := range []*syscall.LazyProc{p.fillLinear, p.fillRadial, p.shadow} {
+		_ = pr.Find()
 	}
 	if r, _, e := p.init.Call(); r != 0 {
 		gpuErr = fmt.Sprintf("gtg_init failed: code=%d %v", r, e)
@@ -118,11 +146,16 @@ func GPUAvailable() bool { return gpuOK.Load() }
 // GPUError returns why the GPU backend is not in use, or "".
 func GPUError() string { return gpuErr }
 
+// MarkDeviceLost records that Present failed with DEVICE_REMOVED. The next
+// LoadGPU rebuilds the whole stack instead of trusting the cached device.
+func MarkDeviceLost() { gpuDead.Store(true) }
+
 // StopGPU releases the device. Safe when the backend never started.
 func StopGPU() {
 	if gpu != nil && gpuOK.Load() {
 		gpu.shutdown.Call()
 	}
+	gpu = nil
 	gpuOK.Store(false)
 }
 
@@ -421,6 +454,51 @@ func (c *GpuCanvas) SetFontFamily(name string) int {
 	}
 	r, _, _ := gpu.setFamily.Call(uintptr(unsafe.Pointer(p)))
 	return int(r)
+}
+
+// effectsReady reports whether the loaded DLL exports the gradient/shadow
+// entry points. Effects degrade to flat fills when it does not.
+func (c *GpuCanvas) effectsReady() bool {
+	return gpu != nil && gpu.fillLinear.Find() == nil
+}
+
+func (c *GpuCanvas) FillLinearGradient(r ui.Rect, from, to ui.Color, vertical bool) {
+	if !c.ok() || r.Empty() {
+		return
+	}
+	if !c.effectsReady() {
+		c.FillRect(r, from)
+		return
+	}
+	v := uintptr(0)
+	if vertical {
+		v = 1
+	}
+	gpu.fillLinear.Call(c.G, uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)),
+		uintptr(i32(r.H)), uintptr(uint32(from)), uintptr(uint32(to)), v)
+}
+
+func (c *GpuCanvas) FillRadialGradient(r ui.Rect, center, edge ui.Color) {
+	if !c.ok() || r.Empty() {
+		return
+	}
+	if gpu == nil || gpu.fillRadial.Find() != nil {
+		c.FillRect(r, center)
+		return
+	}
+	gpu.fillRadial.Call(c.G, uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)),
+		uintptr(i32(r.H)), uintptr(uint32(center)), uintptr(uint32(edge)))
+}
+
+func (c *GpuCanvas) FillShadow(r ui.Rect, radius, blur float32, col ui.Color) {
+	if !c.ok() || r.Empty() || blur <= 0 {
+		return
+	}
+	if gpu == nil || gpu.shadow.Find() != nil {
+		return
+	}
+	gpu.shadow.Call(c.G, uintptr(i32(r.X)), uintptr(i32(r.Y)), uintptr(i32(r.W)),
+		uintptr(i32(r.H)), uintptr(i32(radius)), uintptr(i32(blur)), uintptr(uint32(col)))
 }
 
 var _ ui.Painter = (*GpuCanvas)(nil)

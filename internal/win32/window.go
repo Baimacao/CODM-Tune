@@ -230,14 +230,21 @@ func (w *window) tick() {
 		// bound and a single batch, and Present must happen after EndDraw.
 		c := w.gpu.BeginCanvas(ui.CurrentTheme.Bg)
 		if c != nil {
-			drew = w.app.Frame(c, dt)
-			w.drawChromeGpu(c)
-			c.Close()
-			w.gpu.Canvas = nil
+			// EndDraw must run even if Frame panics, or the D2D context stays
+			// in a drawing state and every later frame fails silently. The
+			// deferred close also runs before the panic reaches the runtime.
+			func() {
+				defer func() {
+					c.Close()
+					w.gpu.Canvas = nil
+				}()
+				drew = w.app.Frame(c, dt)
+				w.drawChromeGpu(c)
+			}()
 			if drew {
 				if !w.gpu.Present() {
-					// Device lost: fall back to software for this run rather
-					// than presenting a black window forever.
+					// Device lost: fall back to software rather than present a
+					// black window forever.
 					w.dropGPU()
 				}
 			}
@@ -276,13 +283,16 @@ func (w *window) attachGPU() error {
 	return nil
 }
 
-// dropGPU releases the swap chain and returns to the software surface.
+// dropGPU releases the swap chain and returns to the software surface. When
+// the cause was a lost device, the whole backend is marked dead so the next
+// attachGPU rebuilds it instead of reusing a stale ID2D1Device.
 func (w *window) dropGPU() {
 	if w.gpu == nil {
 		return
 	}
 	w.gpu.Close()
 	w.gpu = nil
+	MarkDeviceLost()
 }
 
 func (w *window) present() {
